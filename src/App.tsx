@@ -2,6 +2,7 @@ import './App.css';
 import { usingCloud } from './lib/db';
 import AuthGate from './components/AuthGate';
 import Workspace from './components/Workspace';
+import Changelog from './components/Changelog';
 
 export default function App() {
   return (
@@ -16,6 +17,8 @@ export default function App() {
       <AuthGate>
         <Workspace />
       </AuthGate>
+
+      <Changelog />
     </div>
   );
 }
