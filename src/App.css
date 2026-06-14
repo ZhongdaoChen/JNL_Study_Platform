@@ -132,6 +132,18 @@ button {
   text-decoration: underline;
   font-size: 14px;
 }
+.link-btn:disabled {
+  color: #aaa;
+  cursor: default;
+}
+.example-area {
+  margin-top: 12px;
+}
+.example-error {
+  margin-top: 12px;
+  font-size: 14px;
+  color: #d23b3b;
+}
 
 .grade-buttons {
   display: flex;

@@ -108,6 +108,7 @@
 - **必须设的环境变量**(否则用本地存储模式):
   - `VITE_SUPABASE_URL` = https://yuakftddvvwccnnckyyv.supabase.co
   - `VITE_SUPABASE_ANON_KEY` = (见 .env.local)
+  - `QWEN_API_KEY` = (通义千问 Key, 见 .env.local; ⚠️ 仅服务端用, 不要加 VITE_ 前缀)
 - 部署后: 把 Vercel 网址填到 Supabase Authentication → Site URL
 - 免费额度对个人足够; 备案完成后可在 Vercel 绑定 jnlstudy.com(也免备案/免费 HTTPS)
 
@@ -123,10 +124,16 @@
 - [x] git 初始化并推送 GitHub
 - [x] 修复复习计数错乱(refreshKey 导致重置)、去除每日上限、显示今日复习总数
 - [x] 写好 DEPLOY.md(阿里云) 与 vercel.json
+- [x] AI 例句: 复习时"看例句提示"调用通义千问(qwen-turbo)生成儿童例句, 落库复用, 「换一句」可重新生成
+  - 服务端代理: `api/generate-sentence.ts`(Vercel Serverless, 读 `QWEN_API_KEY`), 前端 `src/lib/ai.ts`
+  - Word 新增字段 `exampleSentence`; schema.sql 加 `example_sentence` 列(含旧库兼容 ALTER)
 
 ### 进行中
 - [ ] Vercel 部署(用户已邮箱登录, 待绑定 GitHub→导入→设环境变量→Deploy)
 - [ ] Supabase: 关闭邮箱验证、设 Site URL、确认已执行 schema.sql
+- [ ] ⚠️ 旧库需执行 `alter table words add column if not exists example_sentence text;`
+- [ ] ⚠️ Vercel 后台需新增环境变量 `QWEN_API_KEY`(否则 AI 例句报错)
+- [ ] ⚠️ 建议轮换泄露的 Qwen Key(曾明文发送)
 - [ ] 阿里云 ICP 备案(并行长期任务)
 
 ### 后续可做(用户感兴趣的 backlog)

@@ -31,6 +31,10 @@ export interface Word {
   sentenceIds: string[];
   firstLearnedAt: string;
 
+  // AI 生成的例句（小学以内词汇）。生成后落库，复习时固定展示，
+  // 用户可手动「换一句」重新生成覆盖。null 表示尚未生成。
+  exampleSentence: string | null;
+
   // ---- 儿童版 SM-2 状态 ----
   interval: number; // 距离下次复习的天数
   ef: number; // 熟练度因子 ease factor

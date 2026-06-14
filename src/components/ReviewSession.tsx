@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react';
 import { repo } from '../lib/db';
 import { getDueReviews, submitReview } from '../lib/wordService';
-import type { Grade, Sentence, Word } from '../lib/types';
+import { generateExampleSentence } from '../lib/ai';
+import type { Grade, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 
-// 模块2 + 模块3：今日复习清单 + 逐词三档反馈
+// 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
 export default function ReviewSession({ childId, onChanged }: {
   childId: string;
   onChanged: () => void;
 }) {
   const [queue, setQueue] = useState<Word[]>([]);
-  const [sentences, setSentences] = useState<Record<string, Sentence>>({});
   const [idx, setIdx] = useState(0);
-  const [showContext, setShowContext] = useState(false);
+  const [showExample, setShowExample] = useState(false);
+  const [genLoading, setGenLoading] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
 
@@ -21,13 +23,12 @@ export default function ReviewSession({ childId, onChanged }: {
     (async () => {
       setLoading(true);
       const due = await getDueReviews(repo, childId);
-      const sents = await repo.getSentences(childId);
       if (!active) return;
       setQueue(due);
-      setSentences(Object.fromEntries(sents.map((s) => [s.id, s])));
       setIdx(0);
       setDoneCount(0);
-      setShowContext(false);
+      setShowExample(false);
+      setGenError(null);
       setLoading(false);
     })();
     return () => {
@@ -43,9 +44,33 @@ export default function ReviewSession({ childId, onChanged }: {
     if (!current) return;
     await submitReview(repo, current, g);
     setDoneCount((c) => c + 1);
-    setShowContext(false);
+    setShowExample(false);
+    setGenError(null);
     setIdx((i) => i + 1);
     onChanged();
+  }
+
+  // 生成例句并落库；force=true 时强制重新生成（换一句）
+  async function generate(force: boolean) {
+    if (!current) return;
+    if (!force && current.exampleSentence) return; // 已有则不重复生成
+    setGenLoading(true);
+    setGenError(null);
+    try {
+      const sentence = await generateExampleSentence(current.text);
+      const updated: Word = { ...current, exampleSentence: sentence };
+      await repo.upsertWord(updated);
+      setQueue((q) => q.map((w) => (w.id === updated.id ? updated : w)));
+    } catch (e: any) {
+      setGenError(e?.message || '生成失败');
+    } finally {
+      setGenLoading(false);
+    }
+  }
+
+  function handleShowExample() {
+    setShowExample(true);
+    if (current && !current.exampleSentence) generate(false);
   }
 
   if (loading) return <div className="card"><p>加载中…</p></div>;
@@ -68,10 +93,6 @@ export default function ReviewSession({ childId, onChanged }: {
     );
   }
 
-  const contextSentence = current.sentenceIds
-    .map((id) => sentences[id]?.text)
-    .find(Boolean);
-
   return (
     <div className="card">
       <h2>🔁 今日复习（共 {queue.length} 个）</h2>
@@ -79,10 +100,22 @@ export default function ReviewSession({ childId, onChanged }: {
 
       <div className="word-card">
         <div className="big-word">{current.text}</div>
-        {showContext ? (
-          <p className="context">{contextSentence ?? '（无语境句子）'}</p>
+
+        {showExample ? (
+          <div className="example-area">
+            {genLoading ? (
+              <p className="context">✨ 正在生成例句…</p>
+            ) : genError ? (
+              <p className="example-error">{genError}</p>
+            ) : (
+              <p className="context">{current.exampleSentence ?? '（暂无例句）'}</p>
+            )}
+            <button className="link-btn" onClick={() => generate(true)} disabled={genLoading}>
+              {genLoading ? '生成中…' : '🔄 换一句'}
+            </button>
+          </div>
         ) : (
-          <button className="link-btn" onClick={() => setShowContext(true)}>
+          <button className="link-btn" onClick={handleShowExample}>
             看例句提示
           </button>
         )}

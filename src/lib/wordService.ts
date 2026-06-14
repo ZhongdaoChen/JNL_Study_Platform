@@ -39,6 +39,7 @@ export async function addLearning(
         text: t,
         sentenceIds: [sentence.id],
         firstLearnedAt: learnedOn,
+        exampleSentence: null,
         ...initialReviewState(learnedOn),
       };
       await repo.upsertWord(word);
