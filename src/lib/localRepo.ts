@@ -66,7 +66,10 @@ export class LocalRepo implements Repo {
   }
 
   async getWords(childId: string): Promise<Word[]> {
-    return load().words.filter((w) => w.childId === childId);
+    // 兼容旧数据：早期单词没有 lang 字段，统一视为英文
+    return load()
+      .words.filter((w) => w.childId === childId)
+      .map((w) => ({ ...w, lang: w.lang ?? 'en' }));
   }
 
   async upsertWord(word: Word): Promise<void> {

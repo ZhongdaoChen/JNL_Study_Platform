@@ -29,6 +29,7 @@ create table if not exists words (
   id uuid primary key default gen_random_uuid(),
   child_id uuid not null references children (id) on delete cascade,
   text text not null,
+  lang text not null default 'en',
   sentence_ids uuid[] not null default '{}',
   first_learned_at timestamptz not null default now(),
   example_sentence text,
@@ -41,8 +42,9 @@ create table if not exists words (
   unique (child_id, text)
 );
 
--- 兼容旧库：若 words 表已存在但缺少该列，补上（安全幂等）
+-- 兼容旧库：若 words 表已存在但缺少这些列，补上（安全幂等）
 alter table words add column if not exists example_sentence text;
+alter table words add column if not exists lang text not null default 'en';
 
 -- 复习日志
 create table if not exists review_logs (

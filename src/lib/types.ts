@@ -1,6 +1,14 @@
 // 三档复习评分（贴合 5 岁儿童的简化反馈）
 export type Grade = 'mastered' | 'fuzzy' | 'forgotten';
 
+// 学习语言：英文单词 / 中文单字。两类分开记录、分开复习。
+export type Lang = 'en' | 'zh';
+
+export const LANG_LABELS: Record<Lang, string> = {
+  en: '英文',
+  zh: '中文',
+};
+
 export const GRADE_LABELS: Record<Grade, string> = {
   mastered: '熟练',
   fuzzy: '略陌生',
@@ -26,7 +34,9 @@ export interface Sentence {
 export interface Word {
   id: string;
   childId: string;
-  text: string; // 规范化后的小写词
+  text: string; // 英文：规范化后的小写词；中文：单个汉字
+  // 学习语言。en=英文单词，zh=中文单字。决定拆分方式与复习分组。
+  lang: Lang;
   // 该词出现过的句子 id（用于复习时展示语境）
   sentenceIds: string[];
   firstLearnedAt: string;

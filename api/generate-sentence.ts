@@ -21,6 +21,7 @@ export default async function handler(req: any, res: any) {
   // Vercel 在 Content-Type: application/json 时会自动解析 req.body
   const body = typeof req.body === 'string' ? safeParse(req.body) : req.body;
   const word = String(body?.word ?? '').trim();
+  const lang = body?.lang === 'zh' ? 'zh' : 'en';
   if (!word) {
     res.status(400).json({ error: '缺少参数 word' });
     return;
@@ -30,17 +31,22 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  try {
-    const r = await fetch(DASHSCOPE_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'qwen-turbo',
-        temperature: 0.9,
-        messages: [
+  const messages =
+    lang === 'zh'
+      ? [
+          {
+            role: 'system',
+            content:
+              '你为一个 5 岁、正在认字的中国小朋友编写简单的中文例句。' +
+              '只用小学以内的常用字词。输出恰好一句简短的中文句子（5 到 12 个字）。' +
+              '句子必须自然地包含给定的汉字。不要加引号、拼音、翻译或任何多余文字。',
+          },
+          {
+            role: 'user',
+            content: `请用「${word}」这个字写一句简单的中文句子。`,
+          },
+        ]
+      : [
           {
             role: 'system',
             content:
@@ -52,7 +58,19 @@ export default async function handler(req: any, res: any) {
             role: 'user',
             content: `Write one simple sentence that uses the word "${word}".`,
           },
-        ],
+        ];
+
+  try {
+    const r = await fetch(DASHSCOPE_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'qwen-turbo',
+        temperature: 0.9,
+        messages,
       }),
     });
 

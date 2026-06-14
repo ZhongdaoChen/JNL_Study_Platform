@@ -127,11 +127,16 @@
 - [x] AI 例句: 复习时"看例句提示"调用通义千问(qwen-turbo)生成儿童例句, 落库复用, 「换一句」可重新生成
   - 服务端代理: `api/generate-sentence.ts`(Vercel Serverless, 读 `QWEN_API_KEY`), 前端 `src/lib/ai.ts`
   - Word 新增字段 `exampleSentence`; schema.sql 加 `example_sentence` 列(含旧库兼容 ALTER)
+- [x] 中文学习: 可录入中文(按单字拆分), 与英文分开记录(Word.lang='en'|'zh')
+  - 录入页加 英文/中文 切换; 复习、总览模块各加 英文/中文 子标签, 只显示对应语言内容
+  - AI 例句按语言生成(中文字生成简单中文句子); schema.sql 加 `lang` 列(含旧库兼容 ALTER)
+  - 复用同一套 SM-2/仓储/复习逻辑, 仅按 lang 过滤; 中文单字与英文单词字符集不重叠, 无冲突
 
 ### 进行中
 - [ ] Vercel 部署(用户已邮箱登录, 待绑定 GitHub→导入→设环境变量→Deploy)
 - [ ] Supabase: 关闭邮箱验证、设 Site URL、确认已执行 schema.sql
 - [ ] ⚠️ 旧库需执行 `alter table words add column if not exists example_sentence text;`
+- [ ] ⚠️ 旧库需执行 `alter table words add column if not exists lang text not null default 'en';`
 - [ ] ⚠️ Vercel 后台需新增环境变量 `QWEN_API_KEY`(否则 AI 例句报错)
 - [ ] ⚠️ 建议轮换泄露的 Qwen Key(曾明文发送)
 - [ ] 阿里云 ICP 备案(并行长期任务)

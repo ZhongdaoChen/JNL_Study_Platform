@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { repo } from '../lib/db';
 import { getDueReviews, submitReview } from '../lib/wordService';
 import { generateExampleSentence } from '../lib/ai';
-import type { Grade, Word } from '../lib/types';
+import type { Grade, Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
-export default function ReviewSession({ childId, onChanged }: {
+export default function ReviewSession({ childId, lang, onChanged }: {
   childId: string;
+  lang: Lang;
   onChanged: () => void;
 }) {
   const [queue, setQueue] = useState<Word[]>([]);
@@ -22,7 +23,7 @@ export default function ReviewSession({ childId, onChanged }: {
     let active = true;
     (async () => {
       setLoading(true);
-      const due = await getDueReviews(repo, childId);
+      const due = await getDueReviews(repo, childId, lang);
       if (!active) return;
       setQueue(due);
       setIdx(0);
@@ -34,9 +35,9 @@ export default function ReviewSession({ childId, onChanged }: {
     return () => {
       active = false;
     };
-    // 仅在进入复习页/切换孩子时加载一次队列；
+    // 进入复习页/切换孩子/切换语言时各加载一次队列；
     // 评分过程中不重载，避免进度被重置（onChanged 只用于刷新其他标签）。
-  }, [childId]);
+  }, [childId, lang]);
 
   const current = queue[idx];
 
@@ -57,7 +58,7 @@ export default function ReviewSession({ childId, onChanged }: {
     setGenLoading(true);
     setGenError(null);
     try {
-      const sentence = await generateExampleSentence(current.text);
+      const sentence = await generateExampleSentence(current.text, lang);
       const updated: Word = { ...current, exampleSentence: sentence };
       await repo.upsertWord(updated);
       setQueue((q) => q.map((w) => (w.id === updated.id ? updated : w)));
@@ -73,13 +74,15 @@ export default function ReviewSession({ childId, onChanged }: {
     if (current && !current.exampleSentence) generate(false);
   }
 
+  const unit = lang === 'zh' ? '字' : '单词';
+
   if (loading) return <div className="card"><p>加载中…</p></div>;
 
   if (queue.length === 0) {
     return (
       <div className="card">
         <h2>🔁 今日复习</h2>
-        <p className="hint">今天没有需要复习的单词，太棒了！去录入新内容吧。</p>
+        <p className="hint">今天没有需要复习的{unit}，太棒了！去录入新内容吧。</p>
       </div>
     );
   }
@@ -88,7 +91,7 @@ export default function ReviewSession({ childId, onChanged }: {
     return (
       <div className="card">
         <h2>🎉 复习完成</h2>
-        <p className="hint">今天复习了 {doneCount} 个单词，已更新复习计划。</p>
+        <p className="hint">今天复习了 {doneCount} 个{unit}，已更新复习计划。</p>
       </div>
     );
   }
@@ -96,7 +99,7 @@ export default function ReviewSession({ childId, onChanged }: {
   return (
     <div className="card">
       <h2>🔁 今日复习（共 {queue.length} 个）</h2>
-      <p className="hint">第 {idx + 1} / {queue.length} 个 · 让孩子读出这个词</p>
+      <p className="hint">第 {idx + 1} / {queue.length} 个 · 让孩子读出这个{unit}</p>
 
       <div className="word-card">
         <div className="big-word">{current.text}</div>

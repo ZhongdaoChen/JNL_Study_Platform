@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { repo } from '../lib/db';
-import type { Child } from '../lib/types';
+import type { Child, Lang } from '../lib/types';
+import { LANG_LABELS } from '../lib/types';
 import LearnInput from './LearnInput';
 import ReviewSession from './ReviewSession';
 import WordList from './WordList';
@@ -13,6 +14,8 @@ export default function Workspace() {
   const [children, setChildren] = useState<Child[]>([]);
   const [activeChild, setActiveChild] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('learn');
+  // 复习/总览模块内的语言子标签（英文/中文），两模块共用。
+  const [subLang, setSubLang] = useState<Lang>('en');
   const [refreshKey, setRefreshKey] = useState(0);
   const [newName, setNewName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -79,10 +82,27 @@ export default function Workspace() {
           </nav>
 
           {tab === 'learn' && <LearnInput childId={activeChild} onChanged={bump} />}
-          {tab === 'review' && (
-            <ReviewSession childId={activeChild} onChanged={bump} />
+
+          {(tab === 'review' || tab === 'words') && (
+            <div className="lang-switch">
+              {(['en', 'zh'] as Lang[]).map((l) => (
+                <button
+                  key={l}
+                  className={subLang === l ? 'lang-btn active' : 'lang-btn'}
+                  onClick={() => setSubLang(l)}
+                >
+                  {LANG_LABELS[l]}
+                </button>
+              ))}
+            </div>
           )}
-          {tab === 'words' && <WordList childId={activeChild} refreshKey={refreshKey} />}
+
+          {tab === 'review' && (
+            <ReviewSession childId={activeChild} lang={subLang} onChanged={bump} />
+          )}
+          {tab === 'words' && (
+            <WordList childId={activeChild} lang={subLang} refreshKey={refreshKey} />
+          )}
           {tab === 'stats' && <StatsBoard childId={activeChild} refreshKey={refreshKey} />}
         </>
       )}

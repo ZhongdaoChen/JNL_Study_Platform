@@ -40,3 +40,24 @@ export function tokenize(sentence: string): string[] {
 
   return result;
 }
+
+// 中文：把一句话拆成去重后的单个汉字（保持首次出现顺序）。
+// 只保留汉字（CJK 统一表意文字），过滤标点、空格、数字、字母等。
+const HAN_RE = /[\u4e00-\u9fff\u3400-\u4dbf]/;
+
+export function tokenizeZh(sentence: string): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const ch of sentence) {
+    if (!HAN_RE.test(ch)) continue; // 只保留汉字
+    if (seen.has(ch)) continue;
+    seen.add(ch);
+    result.push(ch);
+  }
+  return result;
+}
+
+// 按语言选择拆分器
+export function tokenizeByLang(text: string, lang: 'en' | 'zh'): string[] {
+  return lang === 'zh' ? tokenizeZh(text) : tokenize(text);
+}
