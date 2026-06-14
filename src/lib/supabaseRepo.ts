@@ -144,4 +144,10 @@ export class SupabaseRepo implements Repo {
       reviewedAt: r.reviewed_at,
     }));
   }
+
+  async addFeedback(content: string): Promise<void> {
+    // owner 由数据库默认值 auth.uid() 填充
+    const { error } = await this.sb.from('feedback').insert({ content });
+    if (error) this.fail('addFeedback', error);
+  }
 }

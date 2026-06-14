@@ -1,10 +1,31 @@
 import { useState } from 'react';
 import { CHANGELOG } from '../lib/changelog';
+import { repo } from '../lib/db';
 
 // 页面底部的「版本更新」框：默认展示最新一版，可展开查看历史。
+// 末尾附带一个反馈输入框，收集用户建议/需求，写入独立的 feedback 表。
 export default function Changelog() {
   const [expanded, setExpanded] = useState(false);
-  if (CHANGELOG.length === 0) return null;
+  const [feedback, setFeedback] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submitFeedback() {
+    const content = feedback.trim();
+    if (!content) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await repo.addFeedback(content);
+      setFeedback('');
+      setSent(true);
+    } catch (e: any) {
+      setError(e?.message || '提交失败，请稍后再试');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const shown = expanded ? CHANGELOG : CHANGELOG.slice(0, 1);
 
@@ -32,6 +53,24 @@ export default function Changelog() {
           </ul>
         </div>
       ))}
+
+      <div className="feedback-box">
+        <h4>💡 你的建议 / 想要的功能</h4>
+        <textarea
+          value={feedback}
+          onChange={(e) => {
+            setFeedback(e.target.value);
+            setSent(false);
+          }}
+          placeholder="告诉我们你希望增加的功能或使用中的问题…"
+          rows={3}
+        />
+        <button onClick={submitFeedback} disabled={busy || !feedback.trim()}>
+          {busy ? '提交中…' : '提交建议'}
+        </button>
+        {sent && <p className="feedback-ok">✅ 已收到，谢谢你的建议！</p>}
+        {error && <p className="example-error">{error}</p>}
+      </div>
     </section>
   );
 }

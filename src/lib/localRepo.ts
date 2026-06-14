@@ -11,10 +11,11 @@ interface DB {
   sentences: Sentence[];
   words: Word[];
   reviewLogs: ReviewLog[];
+  feedback: { id: string; content: string; createdAt: string }[];
 }
 
 function emptyDB(): DB {
-  return { children: [], sentences: [], words: [], reviewLogs: [] };
+  return { children: [], sentences: [], words: [], reviewLogs: [], feedback: [] };
 }
 
 function load(): DB {
@@ -104,5 +105,11 @@ export class LocalRepo implements Repo {
 
   async getReviewLogs(childId: string): Promise<ReviewLog[]> {
     return load().reviewLogs.filter((l) => l.childId === childId);
+  }
+
+  async addFeedback(content: string): Promise<void> {
+    const db = load();
+    db.feedback.push({ id: uid(), content, createdAt: new Date().toISOString() });
+    save(db);
   }
 }

@@ -137,6 +137,7 @@
 - [ ] Supabase: 关闭邮箱验证、设 Site URL、确认已执行 schema.sql
 - [ ] ⚠️ 旧库需执行 `alter table words add column if not exists example_sentence text;`
 - [ ] ⚠️ 旧库需执行 `alter table words add column if not exists lang text not null default 'en';`
+- [ ] ⚠️ 旧库需新建 feedback 表(重跑 schema.sql 即可, 含表+RLS)
 - [ ] ⚠️ Vercel 后台需新增环境变量 `QWEN_API_KEY`(否则 AI 例句报错)
 - [ ] ⚠️ 建议轮换泄露的 Qwen Key(曾明文发送)
 - [ ] 阿里云 ICP 备案(并行长期任务)

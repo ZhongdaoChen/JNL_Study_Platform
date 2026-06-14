@@ -55,10 +55,19 @@ create table if not exists review_logs (
   reviewed_at timestamptz not null default now()
 );
 
+-- 用户建议 / 需求反馈（独立表，不挂在某个孩子下，直接归属登录用户）
+create table if not exists feedback (
+  id uuid primary key default gen_random_uuid(),
+  owner uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  content text not null,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists idx_sentences_child on sentences (child_id);
 create index if not exists idx_words_child on words (child_id);
 create index if not exists idx_words_due on words (child_id, due_date);
 create index if not exists idx_logs_child on review_logs (child_id);
+create index if not exists idx_feedback_owner on feedback (owner);
 
 -- ============================================================
 -- 启用行级安全
@@ -67,6 +76,7 @@ alter table children enable row level security;
 alter table sentences enable row level security;
 alter table words enable row level security;
 alter table review_logs enable row level security;
+alter table feedback enable row level security;
 
 -- 辅助：判断某个 child 是否属于当前登录用户
 -- (用于子表策略；以 child_id 反查 children.owner)
@@ -100,3 +110,11 @@ create policy words_all on words
 drop policy if exists logs_all on review_logs;
 create policy logs_all on review_logs
   for all using (owns_child(child_id)) with check (owns_child(child_id));
+
+-- feedback：每个用户只能写入并查看自己提交的反馈（管理员在后台 SQL 可查全部）
+drop policy if exists feedback_insert on feedback;
+create policy feedback_insert on feedback
+  for insert with check (owner = auth.uid());
+drop policy if exists feedback_select on feedback;
+create policy feedback_select on feedback
+  for select using (owner = auth.uid());
