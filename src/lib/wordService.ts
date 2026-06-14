@@ -51,18 +51,22 @@ export async function addLearning(
 }
 
 // 模块2：今日复习清单
-// 取出所有到期（dueDate <= 今天）的词，按到期日升序，限制每日数量
+// 取出所有到期（dueDate <= 今天）的词，按到期日升序、同日按单词字母序（稳定）。
+// 不设上限：当天所有到期的词都会列出。
+// 进度记忆：每次评分会立即更新该词的 dueDate（推到未来），评过的词即退出到期池，
+// 因此下次重新进入复习页时只返回尚未复习的词，自动从上次进度继续。
 export async function getDueReviews(
   repo: Repo,
   childId: string,
-  limit = 10,
 ): Promise<Word[]> {
   const words = await repo.getWords(childId);
   const t = today();
-  const due = words
+  return words
     .filter((w) => dateLte(w.dueDate, t))
-    .sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0));
-  return due.slice(0, limit);
+    .sort((a, b) => {
+      if (a.dueDate !== b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
+      return a.text < b.text ? -1 : a.text > b.text ? 1 : 0;
+    });
 }
 
 // 模块3：提交复习反馈，更新 SM-2 状态并记日志

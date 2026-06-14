@@ -80,7 +80,7 @@ export default function Workspace() {
 
           {tab === 'learn' && <LearnInput childId={activeChild} onChanged={bump} />}
           {tab === 'review' && (
-            <ReviewSession childId={activeChild} refreshKey={refreshKey} onChanged={bump} />
+            <ReviewSession childId={activeChild} onChanged={bump} />
           )}
           {tab === 'words' && <WordList childId={activeChild} refreshKey={refreshKey} />}
           {tab === 'stats' && <StatsBoard childId={activeChild} refreshKey={refreshKey} />}

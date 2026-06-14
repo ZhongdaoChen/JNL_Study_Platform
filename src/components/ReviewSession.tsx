@@ -4,12 +4,9 @@ import { getDueReviews, submitReview } from '../lib/wordService';
 import type { Grade, Sentence, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 
-const DAILY_LIMIT = 10;
-
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈
-export default function ReviewSession({ childId, refreshKey, onChanged }: {
+export default function ReviewSession({ childId, onChanged }: {
   childId: string;
-  refreshKey: number;
   onChanged: () => void;
 }) {
   const [queue, setQueue] = useState<Word[]>([]);
@@ -23,7 +20,7 @@ export default function ReviewSession({ childId, refreshKey, onChanged }: {
     let active = true;
     (async () => {
       setLoading(true);
-      const due = await getDueReviews(repo, childId, DAILY_LIMIT);
+      const due = await getDueReviews(repo, childId);
       const sents = await repo.getSentences(childId);
       if (!active) return;
       setQueue(due);
@@ -36,7 +33,9 @@ export default function ReviewSession({ childId, refreshKey, onChanged }: {
     return () => {
       active = false;
     };
-  }, [childId, refreshKey]);
+    // 仅在进入复习页/切换孩子时加载一次队列；
+    // 评分过程中不重载，避免进度被重置（onChanged 只用于刷新其他标签）。
+  }, [childId]);
 
   const current = queue[idx];
 
@@ -75,7 +74,7 @@ export default function ReviewSession({ childId, refreshKey, onChanged }: {
 
   return (
     <div className="card">
-      <h2>🔁 今日复习</h2>
+      <h2>🔁 今日复习（共 {queue.length} 个）</h2>
       <p className="hint">第 {idx + 1} / {queue.length} 个 · 让孩子读出这个词</p>
 
       <div className="word-card">
