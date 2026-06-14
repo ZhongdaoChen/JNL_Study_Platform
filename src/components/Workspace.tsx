@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { repo } from '../lib/db';
+import { supabase, usingCloud } from '../lib/supabase';
+import { ADMIN_EMAIL } from '../lib/admin';
 import type { Child, Lang } from '../lib/types';
 import { LANG_LABELS } from '../lib/types';
 import LearnInput from './LearnInput';
@@ -7,8 +9,9 @@ import ReviewSession from './ReviewSession';
 import WordList from './WordList';
 import StatsBoard from './StatsBoard';
 import Changelog from './Changelog';
+import AdminPanel from './AdminPanel';
 
-type Tab = 'learn' | 'review' | 'words' | 'stats';
+type Tab = 'learn' | 'review' | 'words' | 'stats' | 'admin';
 
 // 工作区：登录后（或本地模式）显示的主体。管理孩子档案与三大模块。
 export default function Workspace() {
@@ -20,6 +23,7 @@ export default function Workspace() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [newName, setNewName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     repo
@@ -29,6 +33,13 @@ export default function Workspace() {
         if (cs.length > 0) setActiveChild((prev) => prev ?? cs[0].id);
       })
       .catch((e) => setError(e.message));
+  }, []);
+
+  useEffect(() => {
+    if (!usingCloud || !supabase) return;
+    supabase.auth.getUser().then(({ data }) => {
+      setIsAdmin(data.user?.email === ADMIN_EMAIL);
+    });
   }, []);
 
   async function addChild() {
@@ -80,6 +91,9 @@ export default function Workspace() {
             <button className={tab === 'review' ? 'active' : ''} onClick={() => setTab('review')}>复习</button>
             <button className={tab === 'words' ? 'active' : ''} onClick={() => setTab('words')}>总览</button>
             <button className={tab === 'stats' ? 'active' : ''} onClick={() => setTab('stats')}>统计</button>
+            {isAdmin && (
+              <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>管理员</button>
+            )}
           </nav>
 
           {tab === 'learn' && <LearnInput childId={activeChild} onChanged={bump} />}
@@ -106,6 +120,7 @@ export default function Workspace() {
             <WordList childId={activeChild} lang={subLang} refreshKey={refreshKey} />
           )}
           {tab === 'stats' && <StatsBoard childId={activeChild} refreshKey={refreshKey} />}
+          {tab === 'admin' && isAdmin && <AdminPanel />}
         </>
       )}
     </>

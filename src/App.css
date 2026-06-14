@@ -425,3 +425,20 @@ button {
   font-size: 14px;
   color: #18794e;
 }
+
+/* 管理员：建议列表 */
+.feedback-list { list-style: none; padding: 0; margin: 0; }
+.feedback-list li {
+  border: 1px solid #eceef6;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.fb-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.fb-email { font-size: 13px; color: #5b6cff; }
+.fb-content { font-size: 14px; color: #333; white-space: pre-wrap; }

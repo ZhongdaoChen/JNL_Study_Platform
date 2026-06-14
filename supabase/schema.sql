@@ -118,3 +118,107 @@ create policy feedback_insert on feedback
 drop policy if exists feedback_select on feedback;
 create policy feedback_select on feedback
   for select using (owner = auth.uid());
+
+-- ============================================================
+-- 管理员总览（仅管理员邮箱可取到数据）
+--
+-- 这些函数用 security definer 以函数属主(postgres)身份执行，从而能
+-- 读取 auth.users 并绕过各表 RLS，做跨用户汇总。函数内部用 is_admin()
+-- 校验调用者邮箱，非管理员调用只会拿到空结果，保证安全。
+-- ============================================================
+
+create or replace function is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce((auth.jwt() ->> 'email'), '') = 'chenzhongdao0730@gmail.com';
+$$;
+
+-- 各用户：最后登录时间、注册时间、录入单词数（中英分列）
+create or replace function admin_user_stats()
+returns table(
+  email text,
+  last_sign_in_at timestamptz,
+  created_at timestamptz,
+  word_count bigint,
+  en_count bigint,
+  zh_count bigint
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not is_admin() then return; end if;
+  return query
+    select u.email::text,
+           u.last_sign_in_at,
+           u.created_at,
+           count(w.id) as word_count,
+           count(w.id) filter (where w.lang = 'en') as en_count,
+           count(w.id) filter (where w.lang = 'zh') as zh_count
+    from auth.users u
+    left join children c on c.owner = u.id
+    left join words w on w.child_id = c.id
+    group by u.id, u.email, u.last_sign_in_at, u.created_at
+    order by u.last_sign_in_at desc nulls last;
+end;
+$$;
+
+-- 各用户录入的单词/单字明细
+create or replace function admin_words()
+returns table(
+  email text,
+  child_name text,
+  lang text,
+  word text,
+  repetitions int,
+  due_date date,
+  first_learned_at timestamptz
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not is_admin() then return; end if;
+  return query
+    select u.email::text, c.name, w.lang, w.text, w.repetitions, w.due_date, w.first_learned_at
+    from words w
+    join children c on c.id = w.child_id
+    join auth.users u on u.id = c.owner
+    order by u.email, w.first_learned_at desc;
+end;
+$$;
+
+-- 所有用户提交的建议/需求
+create or replace function admin_feedback()
+returns table(
+  email text,
+  content text,
+  created_at timestamptz
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not is_admin() then return; end if;
+  return query
+    select u.email::text, f.content, f.created_at
+    from feedback f
+    join auth.users u on u.id = f.owner
+    order by f.created_at desc;
+end;
+$$;
+
+grant execute on function is_admin() to authenticated;
+grant execute on function admin_user_stats() to authenticated;
+grant execute on function admin_words() to authenticated;
+grant execute on function admin_feedback() to authenticated;
