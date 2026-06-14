@@ -6,6 +6,7 @@ import LearnInput from './LearnInput';
 import ReviewSession from './ReviewSession';
 import WordList from './WordList';
 import StatsBoard from './StatsBoard';
+import Changelog from './Changelog';
 
 type Tab = 'learn' | 'review' | 'words' | 'stats';
 
@@ -82,6 +83,7 @@ export default function Workspace() {
           </nav>
 
           {tab === 'learn' && <LearnInput childId={activeChild} onChanged={bump} />}
+          {tab === 'learn' && <Changelog />}
 
           {(tab === 'review' || tab === 'words') && (
             <div className="lang-switch">
