@@ -23,7 +23,7 @@ const REVIEW_MODES: { key: ReviewMode; label: string; lang: Lang; spellingOnly: 
 ];
 
 // 工作区：登录后（或本地模式）显示的主体。管理孩子档案与三大模块。
-export default function Workspace() {
+export default function Workspace({ onCompactChange }: { onCompactChange: (compact: boolean) => void }) {
   const [children, setChildren] = useState<Child[]>([]);
   const [activeChild, setActiveChild] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('learn');
@@ -53,6 +53,11 @@ export default function Workspace() {
     });
   }, []);
 
+  // 非「录入」标签时进入精简模式，由 App 隐藏标题行
+  useEffect(() => {
+    onCompactChange(tab !== 'learn');
+  }, [tab, onCompactChange]);
+
   async function addChild() {
     const name = newName.trim();
     if (!name) return;
@@ -72,28 +77,30 @@ export default function Workspace() {
     <>
       {error && <div className="card error-card">⚠️ {error}</div>}
 
-      <div className="child-bar">
-        {children.map((c) => (
-          <button
-            key={c.id}
-            className={c.id === activeChild ? 'chip active' : 'chip'}
-            onClick={() => setActiveChild(c.id)}
-          >
-            {c.name}
-          </button>
-        ))}
-        {children.length === 0 && (
-          <>
-            <input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="新增孩子姓名"
-              onKeyDown={(e) => e.key === 'Enter' && addChild()}
-            />
-            <button onClick={addChild} disabled={!newName.trim()}>＋</button>
-          </>
-        )}
-      </div>
+      {tab === 'learn' && (
+        <div className="child-bar">
+          {children.map((c) => (
+            <button
+              key={c.id}
+              className={c.id === activeChild ? 'chip active' : 'chip'}
+              onClick={() => setActiveChild(c.id)}
+            >
+              {c.name}
+            </button>
+          ))}
+          {children.length === 0 && (
+            <>
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="新增孩子姓名"
+                onKeyDown={(e) => e.key === 'Enter' && addChild()}
+              />
+              <button onClick={addChild} disabled={!newName.trim()}>＋</button>
+            </>
+          )}
+        </div>
+      )}
 
       {!activeChild ? (
         <div className="card">
