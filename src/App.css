@@ -71,6 +71,21 @@ header h1 { font-size: 22px; margin: 8px 0; }
 }
 .card h2 { margin-top: 0; }
 
+.review-card { position: relative; }
+.review-card > .review-del-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  margin-top: 0;
+  background: #fff;
+  color: #e1484d;
+  border: 1px solid #f0c5c7;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.review-card > .review-del-btn:hover { background: #fff2f3; }
+
 .hint { color: #7a7d90; font-size: 14px; }
 
 textarea, input {

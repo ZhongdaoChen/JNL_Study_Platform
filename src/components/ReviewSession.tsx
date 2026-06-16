@@ -74,6 +74,18 @@ export default function ReviewSession({ childId, lang, onChanged }: {
     if (current && !current.exampleSentence) generate(false);
   }
 
+  // 删除当前复习的词：从队列移除并跳到下一个
+  async function deleteCurrent() {
+    if (!current) return;
+    if (!confirm(`确定删除「${current.text}」吗？此操作不可恢复。`)) return;
+    const target = current;
+    await repo.deleteWord(target.id);
+    setQueue((q) => q.filter((w) => w.id !== target.id));
+    setShowExample(false);
+    setGenError(null);
+    onChanged();
+  }
+
   const unit = lang === 'zh' ? '字' : '单词';
 
   if (loading) return <div className="card"><p>加载中…</p></div>;
@@ -97,7 +109,10 @@ export default function ReviewSession({ childId, lang, onChanged }: {
   }
 
   return (
-    <div className="card">
+    <div className="card review-card">
+      <button className="review-del-btn" onClick={deleteCurrent} title={`删除该${unit}`}>
+        🗑 删除
+      </button>
       <h2>🔁 今日复习（共 {queue.length} 个）</h2>
       <p className="hint">第 {idx + 1} / {queue.length} 个 · 让孩子读出这个{unit}</p>
 
