@@ -7,6 +7,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v1.3.0',
+    date: '2026-06-16',
+    items: [
+      '录入时可勾选「需要拼写 / 需要会写」，标记需要动手写出来的词。',
+      '复习页拆分为英文读 / 英文拼 / 中文读 / 中文写：「拼 / 写」只复习勾选过的词。',
+      '总览页每个词可随时勾选是否需要拼写 / 会写。',
+      '复习评分改为即时切换（更快），新增上一个 / 下一个按钮，可删除当前词。',
+    ],
+  },
+  {
     version: 'v1.2.0',
     date: '2026-06-14',
     items: [

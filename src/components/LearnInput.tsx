@@ -10,6 +10,7 @@ export default function LearnInput({ childId, onChanged }: { childId: string; on
   const [lang, setLang] = useState<Lang>('en');
   const [text, setText] = useState('');
   const [learnedOn, setLearnedOn] = useState(today());
+  const [needsSpelling, setNeedsSpelling] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ newWords: string[]; reviewedExisting: string[] } | null>(null);
 
@@ -18,7 +19,7 @@ export default function LearnInput({ childId, onChanged }: { childId: string; on
     if (!trimmed) return;
     setBusy(true);
     try {
-      const r = await addLearning(repo, childId, trimmed, lang, learnedOn);
+      const r = await addLearning(repo, childId, trimmed, lang, learnedOn, needsSpelling);
       setResult({ newWords: r.newWords, reviewedExisting: r.reviewedExisting });
       setText('');
       onChanged();
@@ -71,6 +72,16 @@ export default function LearnInput({ childId, onChanged }: { childId: string; on
         }
         rows={3}
       />
+
+      <label className="check-label">
+        <input
+          type="checkbox"
+          checked={needsSpelling}
+          onChange={(e) => setNeedsSpelling(e.target.checked)}
+        />
+        {lang === 'zh' ? '需要会写（加入「中文写」复习）' : '需要拼写（加入「英文拼」复习）'}
+      </label>
+
       <button onClick={handleSubmit} disabled={busy || !text.trim()}>
         {busy ? '处理中…' : `拆${unit}并保存`}
       </button>

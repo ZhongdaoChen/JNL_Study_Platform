@@ -6,9 +6,10 @@ import type { Grade, Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
-export default function ReviewSession({ childId, lang, onChanged }: {
+export default function ReviewSession({ childId, lang, spellingOnly, onChanged }: {
   childId: string;
   lang: Lang;
+  spellingOnly: boolean;
   onChanged: () => void;
 }) {
   const [queue, setQueue] = useState<Word[]>([]);
@@ -24,7 +25,7 @@ export default function ReviewSession({ childId, lang, onChanged }: {
     let active = true;
     (async () => {
       setLoading(true);
-      const due = await getDueReviews(repo, childId, lang);
+      const due = await getDueReviews(repo, childId, lang, spellingOnly);
       if (!active) return;
       setQueue(due);
       setIdx(0);
@@ -39,7 +40,7 @@ export default function ReviewSession({ childId, lang, onChanged }: {
     };
     // 进入复习页/切换孩子/切换语言时各加载一次队列；
     // 评分过程中不重载，避免进度被重置（onChanged 只用于刷新其他标签）。
-  }, [childId, lang]);
+  }, [childId, lang, spellingOnly]);
 
   const current = queue[idx];
 
@@ -105,14 +106,19 @@ export default function ReviewSession({ childId, lang, onChanged }: {
   }
 
   const unit = lang === 'zh' ? '字' : '单词';
+  const modeLabel = spellingOnly ? (lang === 'zh' ? '会写' : '拼写') : '复习';
 
   if (loading) return <div className="card"><p>加载中…</p></div>;
 
   if (queue.length === 0) {
     return (
       <div className="card">
-        <h2>🔁 今日复习</h2>
-        <p className="hint">今天没有需要复习的{unit}，太棒了！去录入新内容吧。</p>
+        <h2>🔁 今日{modeLabel}</h2>
+        <p className="hint">
+          {spellingOnly
+            ? `今天没有需要${modeLabel}的${unit}，太棒了！可在录入时勾选「${lang === 'zh' ? '需要会写' : '需要拼写'}」。`
+            : `今天没有需要复习的${unit}，太棒了！去录入新内容吧。`}
+        </p>
       </div>
     );
   }
@@ -120,19 +126,25 @@ export default function ReviewSession({ childId, lang, onChanged }: {
   if (!current) {
     return (
       <div className="card">
-        <h2>🎉 复习完成</h2>
-        <p className="hint">今天复习了 {doneCount} 个{unit}，已更新复习计划。</p>
+        <h2>🎉 {modeLabel}完成</h2>
+        <p className="hint">今天{modeLabel}了 {doneCount} 个{unit}，已更新复习计划。</p>
       </div>
     );
   }
+
+  const action = spellingOnly
+    ? lang === 'zh'
+      ? '让孩子写出这个字'
+      : '让孩子拼出这个单词'
+    : `让孩子读出这个${unit}`;
 
   return (
     <div className="card review-card">
       <button className="review-del-btn" onClick={deleteCurrent} title={`删除该${unit}`}>
         🗑 删除
       </button>
-      <h2>🔁 今日复习（共 {queue.length} 个）</h2>
-      <p className="hint">第 {idx + 1} / {queue.length} 个 · 让孩子读出这个{unit}</p>
+      <h2>🔁 今日{modeLabel}（共 {queue.length} 个）</h2>
+      <p className="hint">第 {idx + 1} / {queue.length} 个 · {action}</p>
 
       <div className="word-card">
         <div className="big-word">{current.text}</div>

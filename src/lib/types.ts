@@ -41,6 +41,9 @@ export interface Word {
   sentenceIds: string[];
   firstLearnedAt: string;
 
+  // 是否需要"拼写/会写"练习。勾选后该词会出现在「英文拼 / 中文写」复习里。
+  needsSpelling: boolean;
+
   // AI 生成的例句（小学以内词汇）。生成后落库，复习时固定展示，
   // 用户可手动「换一句」重新生成覆盖。null 表示尚未生成。
   exampleSentence: string | null;

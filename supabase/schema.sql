@@ -33,6 +33,7 @@ create table if not exists words (
   sentence_ids uuid[] not null default '{}',
   first_learned_at timestamptz not null default now(),
   example_sentence text,
+  needs_spelling boolean not null default false,
   interval int not null default 1,
   ef real not null default 2.5,
   repetitions int not null default 0,
@@ -45,6 +46,7 @@ create table if not exists words (
 -- 兼容旧库：若 words 表已存在但缺少这些列，补上（安全幂等）
 alter table words add column if not exists example_sentence text;
 alter table words add column if not exists lang text not null default 'en';
+alter table words add column if not exists needs_spelling boolean not null default false;
 
 -- 复习日志
 create table if not exists review_logs (
