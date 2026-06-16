@@ -105,6 +105,14 @@ export default function ReviewSession({ childId, lang, spellingOnly, onChanged }
     onChanged();
   }
 
+  // 切换当前词是否"需要拼写/会写"，立即落库
+  function toggleSpelling() {
+    if (!current) return;
+    const updated = { ...current, needsSpelling: !current.needsSpelling };
+    setQueue((q) => q.map((w) => (w.id === updated.id ? updated : w)));
+    repo.upsertWord(updated).then(onChanged).catch(() => {});
+  }
+
   const unit = lang === 'zh' ? '字' : '单词';
   const modeLabel = spellingOnly ? (lang === 'zh' ? '会写' : '拼写') : '复习';
 
@@ -168,6 +176,17 @@ export default function ReviewSession({ childId, lang, spellingOnly, onChanged }
           </button>
         )}
       </div>
+
+      {!spellingOnly && (
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={current.needsSpelling}
+            onChange={toggleSpelling}
+          />
+          {lang === 'zh' ? '需要会写（加入「中文写」复习）' : '需要拼写（加入「英文拼」复习）'}
+        </label>
+      )}
 
       <div className="grade-buttons">
         <button className="g-mastered" onClick={() => grade('mastered')}>

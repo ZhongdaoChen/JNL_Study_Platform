@@ -15,7 +15,6 @@ export async function addLearning(
   text: string,
   lang: Lang = 'en',
   learnedOn: string = today(),
-  needsSpelling: boolean = false,
 ): Promise<{ sentence: Sentence; newWords: string[]; reviewedExisting: string[] }> {
   const sentence = await repo.addSentence(childId, text.trim());
   const tokens = tokenizeByLang(text, lang);
@@ -29,17 +28,10 @@ export async function addLearning(
     const found = byText.get(t);
     if (found) {
       // 已学过：把这个句子加入它的语境列表
-      let changed = false;
       if (!found.sentenceIds.includes(sentence.id)) {
         found.sentenceIds.push(sentence.id);
-        changed = true;
+        await repo.upsertWord(found);
       }
-      // 勾选了"需要拼写/会写"则补标记（不取消已有标记）
-      if (needsSpelling && !found.needsSpelling) {
-        found.needsSpelling = true;
-        changed = true;
-      }
-      if (changed) await repo.upsertWord(found);
       reviewedExisting.push(t);
     } else {
       // 新词：按所选学习日期初始化记忆状态
@@ -50,7 +42,7 @@ export async function addLearning(
         lang,
         sentenceIds: [sentence.id],
         firstLearnedAt: learnedOn,
-        needsSpelling,
+        needsSpelling: false,
         exampleSentence: null,
         ...initialReviewState(learnedOn),
       };
