@@ -82,13 +82,16 @@ export async function submitReview(
   grade: Grade,
 ): Promise<Word> {
   const updated: Word = { ...word, ...applyReview(word, grade) };
-  await repo.upsertWord(updated);
-  await repo.addReviewLog({
-    id: crypto.randomUUID(),
-    wordId: word.id,
-    childId: word.childId,
-    grade,
-    reviewedAt: new Date().toISOString(),
-  });
+  // 两次写互不依赖，并行执行，减少一次网络往返的等待
+  await Promise.all([
+    repo.upsertWord(updated),
+    repo.addReviewLog({
+      id: crypto.randomUUID(),
+      wordId: word.id,
+      childId: word.childId,
+      grade,
+      reviewedAt: new Date().toISOString(),
+    }),
+  ]);
   return updated;
 }

@@ -18,6 +18,7 @@ export default function ReviewSession({ childId, lang, onChanged }: {
   const [genError, setGenError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -30,6 +31,7 @@ export default function ReviewSession({ childId, lang, onChanged }: {
       setDoneCount(0);
       setShowExample(false);
       setGenError(null);
+      setSaveError(null);
       setLoading(false);
     })();
     return () => {
@@ -41,14 +43,30 @@ export default function ReviewSession({ childId, lang, onChanged }: {
 
   const current = queue[idx];
 
-  async function grade(g: Grade) {
+  // 乐观更新：先切到下一张卡，保存放后台执行，失败再提示
+  function grade(g: Grade) {
     if (!current) return;
-    await submitReview(repo, current, g);
+    const target = current;
     setDoneCount((c) => c + 1);
     setShowExample(false);
     setGenError(null);
+    setSaveError(null);
     setIdx((i) => i + 1);
-    onChanged();
+    submitReview(repo, target, g)
+      .then((updated) => {
+        setQueue((q) => q.map((w) => (w.id === updated.id ? updated : w)));
+        onChanged();
+      })
+      .catch((e: any) => {
+        setSaveError(`「${target.text}」保存失败：${e?.message || '请检查网络'}`);
+      });
+  }
+
+  // 在队列中前后切换，不评分
+  function goTo(i: number) {
+    setShowExample(false);
+    setGenError(null);
+    setIdx(Math.min(Math.max(i, 0), queue.length - 1));
   }
 
   // 生成例句并落库；force=true 时强制重新生成（换一句）
@@ -150,6 +168,21 @@ export default function ReviewSession({ childId, lang, onChanged }: {
           {GRADE_LABELS.forgotten}
         </button>
       </div>
+
+      <div className="nav-buttons">
+        <button className="nav-btn" onClick={() => goTo(idx - 1)} disabled={idx === 0}>
+          ← 上一个
+        </button>
+        <button
+          className="nav-btn"
+          onClick={() => goTo(idx + 1)}
+          disabled={idx >= queue.length - 1}
+        >
+          下一个 →
+        </button>
+      </div>
+
+      {saveError && <p className="example-error">{saveError}</p>}
     </div>
   );
 }

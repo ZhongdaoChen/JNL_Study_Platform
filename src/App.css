@@ -196,6 +196,24 @@ button {
 .g-fuzzy { background: #f0a500; }
 .g-forgotten { background: #e25555; }
 
+.nav-buttons {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+.nav-buttons .nav-btn {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid #d4d6e2;
+  border-radius: 10px;
+  background: #f5f6fb;
+  color: #44485c;
+  font-size: 15px;
+}
+.nav-buttons .nav-btn:hover:not(:disabled) { background: #e9ebf6; }
+.nav-buttons .nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 .word-table {
   width: 100%;
   border-collapse: collapse;
