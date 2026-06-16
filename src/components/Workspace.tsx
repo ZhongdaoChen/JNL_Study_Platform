@@ -82,13 +82,17 @@ export default function Workspace() {
             {c.name}
           </button>
         ))}
-        <input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          placeholder="新增孩子姓名"
-          onKeyDown={(e) => e.key === 'Enter' && addChild()}
-        />
-        <button onClick={addChild} disabled={!newName.trim()}>＋</button>
+        {children.length === 0 && (
+          <>
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="新增孩子姓名"
+              onKeyDown={(e) => e.key === 'Enter' && addChild()}
+            />
+            <button onClick={addChild} disabled={!newName.trim()}>＋</button>
+          </>
+        )}
       </div>
 
       {!activeChild ? (
