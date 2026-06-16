@@ -50,13 +50,13 @@ export default async function handler(req: any, res: any) {
           {
             role: 'system',
             content:
-              'You write very simple English example sentences for a 5-year-old child who is learning English. ' +
-              'Use only elementary/primary-school vocabulary. Output EXACTLY one short sentence (3 to 8 words). ' +
+              'You write simple English example sentences for a child at around US 5th-grade (primary school, age 10-11) reading level. ' +
+              'Use everyday vocabulary a 5th grader would know. Output EXACTLY one sentence, preferably 5 to 10 words long. ' +
               'No quotes, no translation, no extra text, no explanations.',
           },
           {
             role: 'user',
-            content: `Write one simple sentence that uses the word "${word}".`,
+            content: `Write one example sentence that uses the word "${word}".`,
           },
         ];
 
