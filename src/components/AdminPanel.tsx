@@ -83,7 +83,6 @@ export default function AdminPanel() {
           <table className="word-table">
             <thead>
               <tr>
-                <th>用户</th>
                 <th>孩子</th>
                 <th>语言</th>
                 <th>内容</th>
@@ -94,7 +93,6 @@ export default function AdminPanel() {
             <tbody>
               {words.map((w, i) => (
                 <tr key={i}>
-                  <td>{w.email}</td>
                   <td>{w.child_name}</td>
                   <td>{w.lang === 'zh' ? '中' : '英'}</td>
                   <td>{w.word}</td>
