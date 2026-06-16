@@ -140,7 +140,7 @@ export default function ReviewSession({ childId, lang, onChanged }: {
         {showExample ? (
           <div className="example-area">
             {genLoading ? (
-              <p className="context">✨ 正在生成例句…</p>
+              <p className="context">✨ AI正在生成例句…</p>
             ) : genError ? (
               <p className="example-error">{genError}</p>
             ) : (
