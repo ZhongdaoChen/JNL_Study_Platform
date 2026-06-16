@@ -19,6 +19,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, onChanged }
   const [genError, setGenError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
+  // 当前词"需要拼写/会写"的勾选意向；仅评分为"熟练"时才真正写入 needsSpelling。
+  const [wantSpelling, setWantSpelling] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,10 +46,16 @@ export default function ReviewSession({ childId, lang, spellingOnly, onChanged }
 
   const current = queue[idx];
 
+  // 切换当前词时，把勾选意向重置为该词已有的 needsSpelling 状态
+  useEffect(() => {
+    setWantSpelling(current?.needsSpelling ?? false);
+  }, [current?.id]);
+
   // 乐观更新：先切到下一张卡，保存放后台执行，失败再提示
   function grade(g: Grade) {
     if (!current) return;
-    const target = current;
+    // 仅"熟练"才把勾选的"需要拼写/会写"真正落库；否则暂不加入
+    const target: Word = { ...current, needsSpelling: wantSpelling && g === 'mastered' };
     setDoneCount((c) => c + 1);
     setShowExample(false);
     setGenError(null);
@@ -105,12 +113,9 @@ export default function ReviewSession({ childId, lang, spellingOnly, onChanged }
     onChanged();
   }
 
-  // 切换当前词是否"需要拼写/会写"，立即落库
+  // 切换当前词的"需要拼写/会写"勾选意向（仅本地，评分熟练时才落库）
   function toggleSpelling() {
-    if (!current) return;
-    const updated = { ...current, needsSpelling: !current.needsSpelling };
-    setQueue((q) => q.map((w) => (w.id === updated.id ? updated : w)));
-    repo.upsertWord(updated).then(onChanged).catch(() => {});
+    setWantSpelling((v) => !v);
   }
 
   const unit = lang === 'zh' ? '字' : '单词';
@@ -181,10 +186,12 @@ export default function ReviewSession({ childId, lang, spellingOnly, onChanged }
         <label className="check-label">
           <input
             type="checkbox"
-            checked={current.needsSpelling}
+            checked={wantSpelling}
             onChange={toggleSpelling}
           />
-          {lang === 'zh' ? '需要会写（加入「中文写」复习）' : '需要拼写（加入「英文拼」复习）'}
+          {lang === 'zh'
+            ? '需要会写（评分「熟练」后加入「中文写」）'
+            : '需要拼写（评分「熟练」后加入「英文拼」）'}
         </label>
       )}
 
