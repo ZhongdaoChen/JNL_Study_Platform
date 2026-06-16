@@ -159,27 +159,49 @@ export default function ReviewSession({ childId, lang, spellingOnly, onChanged }
       <h2>🔁 今日{modeLabel}（共 {queue.length} 个）</h2>
       <p className="hint">第 {idx + 1} / {queue.length} 个 · {action}</p>
 
-      <div className="word-card">
-        <div className="big-word">{current.text}</div>
+      <div className="word-row">
+        <button
+          className="word-arrow"
+          onClick={() => goTo(idx - 1)}
+          disabled={idx === 0}
+          title="上一个"
+          aria-label="上一个"
+        >
+          ‹
+        </button>
 
-        {showExample ? (
-          <div className="example-area">
-            {genLoading ? (
-              <p className="context">✨ AI正在生成例句…</p>
-            ) : genError ? (
-              <p className="example-error">{genError}</p>
-            ) : (
-              <p className="context">{current.exampleSentence ?? '（暂无例句）'}</p>
-            )}
-            <button className="link-btn" onClick={() => generate(true)} disabled={genLoading}>
-              {genLoading ? '生成中…' : '🔄 换一句'}
+        <div className="word-card">
+          <div className="big-word">{current.text}</div>
+
+          {showExample ? (
+            <div className="example-area">
+              {genLoading ? (
+                <p className="context">✨ AI正在生成例句…</p>
+              ) : genError ? (
+                <p className="example-error">{genError}</p>
+              ) : (
+                <p className="context">{current.exampleSentence ?? '（暂无例句）'}</p>
+              )}
+              <button className="link-btn" onClick={() => generate(true)} disabled={genLoading}>
+                {genLoading ? '生成中…' : '🔄 换一句'}
+              </button>
+            </div>
+          ) : (
+            <button className="link-btn" onClick={handleShowExample}>
+              看例句提示
             </button>
-          </div>
-        ) : (
-          <button className="link-btn" onClick={handleShowExample}>
-            看例句提示
-          </button>
-        )}
+          )}
+        </div>
+
+        <button
+          className="word-arrow"
+          onClick={() => goTo(idx + 1)}
+          disabled={idx >= queue.length - 1}
+          title="下一个"
+          aria-label="下一个"
+        >
+          ›
+        </button>
       </div>
 
       {!spellingOnly && (
@@ -204,19 +226,6 @@ export default function ReviewSession({ childId, lang, spellingOnly, onChanged }
         </button>
         <button className="g-forgotten" onClick={() => grade('forgotten')}>
           {GRADE_LABELS.forgotten}
-        </button>
-      </div>
-
-      <div className="nav-buttons">
-        <button className="nav-btn" onClick={() => goTo(idx - 1)} disabled={idx === 0}>
-          ← 上一个
-        </button>
-        <button
-          className="nav-btn"
-          onClick={() => goTo(idx + 1)}
-          disabled={idx >= queue.length - 1}
-        >
-          下一个 →
         </button>
       </div>
 

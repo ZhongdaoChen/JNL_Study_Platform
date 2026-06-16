@@ -196,23 +196,29 @@ button {
 .g-fuzzy { background: #f0a500; }
 .g-forgotten { background: #e25555; }
 
-.nav-buttons {
+.word-row {
   display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 10px;
+  align-items: stretch;
+  gap: 0;
 }
-.nav-buttons .nav-btn {
+.word-row .word-card {
   flex: 1;
-  padding: 10px;
-  border: 1px solid #d4d6e2;
-  border-radius: 10px;
-  background: #f5f6fb;
-  color: #44485c;
-  font-size: 15px;
+  min-width: 0;
 }
-.nav-buttons .nav-btn:hover:not(:disabled) { background: #e9ebf6; }
-.nav-buttons .nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.word-arrow {
+  flex: 0 0 auto;
+  align-self: stretch;
+  background: none;
+  border: none;
+  color: #5b6cff;
+  font-size: 40px;
+  line-height: 1;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+}
+.word-arrow:hover:not(:disabled) { color: #3a49d6; }
+.word-arrow:disabled { color: #d4d6e2; cursor: not-allowed; }
 
 .word-table {
   width: 100%;
