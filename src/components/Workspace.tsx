@@ -8,10 +8,11 @@ import LearnInput from './LearnInput';
 import ReviewSession from './ReviewSession';
 import WordList from './WordList';
 import StatsBoard from './StatsBoard';
+import Settings from './Settings';
 import Changelog from './Changelog';
 import AdminPanel from './AdminPanel';
 
-type Tab = 'learn' | 'review' | 'words' | 'stats' | 'admin';
+type Tab = 'learn' | 'review' | 'words' | 'stats' | 'settings' | 'admin';
 
 // 复习模式：英文/中文 × 读/拼写。"拼写/会写"模式只复习勾选过需要拼写的词。
 type ReviewMode = 'en-read' | 'en-spell' | 'zh-read' | 'zh-write';
@@ -123,6 +124,7 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
             <button className={tab === 'review' ? 'active' : ''} onClick={() => setTab('review')}>复习</button>
             <button className={tab === 'words' ? 'active' : ''} onClick={() => setTab('words')}>总览</button>
             <button className={tab === 'stats' ? 'active' : ''} onClick={() => setTab('stats')}>统计</button>
+            <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}>配置</button>
             {isAdmin && (
               <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}>管理员</button>
             )}
@@ -177,12 +179,13 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
                 childId={activeChild}
                 lang={subLang}
                 refreshKey={refreshKey}
-                countdownSec={countdownSec}
-                onCountdownChange={setCountdownSec}
               />
             </>
           )}
           {tab === 'stats' && <StatsBoard childId={activeChild} refreshKey={refreshKey} />}
+          {tab === 'settings' && (
+            <Settings countdownSec={countdownSec} onCountdownChange={setCountdownSec} />
+          )}
           {tab === 'admin' && isAdmin && <AdminPanel />}
         </>
       )}

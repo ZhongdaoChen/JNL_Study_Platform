@@ -5,12 +5,10 @@ import { GRADE_LABELS } from '../lib/types';
 import { today } from '../lib/date';
 
 // 概览：单词/单字记忆状态一览，支持单个删除与批量多选删除
-export default function WordList({ childId, lang, refreshKey, countdownSec, onCountdownChange }: {
+export default function WordList({ childId, lang, refreshKey }: {
   childId: string;
   lang: Lang;
   refreshKey: number;
-  countdownSec: number;
-  onCountdownChange: (sec: number) => void;
 }) {
   const [words, setWords] = useState<Word[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -76,26 +74,10 @@ export default function WordList({ childId, lang, refreshKey, countdownSec, onCo
   const dueCount = words.filter((w) => w.dueDate <= t).length;
   const allChecked = words.length > 0 && selected.size === words.length;
 
-  const countdownConfig = (
-    <div className="countdown-config">
-      <label className="field-label">复习倒计时（秒，0=关闭）</label>
-      <input
-        className="date-input"
-        type="number"
-        min={0}
-        max={600}
-        value={countdownSec}
-        onChange={(e) => onCountdownChange(Number(e.target.value))}
-      />
-      <span className="hint">超时未评分将自动判为「彻底陌生」并跳到下一个。</span>
-    </div>
-  );
-
   if (words.length === 0) {
     return (
       <div className="card">
         <h2>📚 {unit}总览</h2>
-        {countdownConfig}
         <p className="hint">还没有{unit}，先去录入今日学习内容吧。</p>
       </div>
     );
@@ -104,7 +86,6 @@ export default function WordList({ childId, lang, refreshKey, countdownSec, onCo
   return (
     <div className="card">
       <h2>📚 {unit}总览</h2>
-      {countdownConfig}
       <p className="hint">共 {words.length} 个{unit} · 今天到期 {dueCount} 个</p>
 
       <div className="batch-bar">
