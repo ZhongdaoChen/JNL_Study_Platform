@@ -35,6 +35,16 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
   const [newName, setNewName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  // 复习倒计时时长（秒），0=关闭。全局设置，持久化到 localStorage。
+  const [countdownSec, setCountdownSecState] = useState<number>(() => {
+    const v = Number(localStorage.getItem('review-countdown-sec'));
+    return Number.isFinite(v) && v > 0 ? v : 0;
+  });
+  const setCountdownSec = (n: number) => {
+    const v = Math.max(0, Math.floor(Number(n) || 0));
+    setCountdownSecState(v);
+    localStorage.setItem('review-countdown-sec', String(v));
+  };
 
   useEffect(() => {
     repo
@@ -142,6 +152,7 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
                     childId={activeChild}
                     lang={m.lang}
                     spellingOnly={m.spellingOnly}
+                    countdownSec={countdownSec}
                     onChanged={bump}
                   />
                 );
@@ -162,7 +173,13 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
                   </button>
                 ))}
               </div>
-              <WordList childId={activeChild} lang={subLang} refreshKey={refreshKey} />
+              <WordList
+                childId={activeChild}
+                lang={subLang}
+                refreshKey={refreshKey}
+                countdownSec={countdownSec}
+                onCountdownChange={setCountdownSec}
+              />
             </>
           )}
           {tab === 'stats' && <StatsBoard childId={activeChild} refreshKey={refreshKey} />}

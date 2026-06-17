@@ -7,6 +7,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v1.4.0',
+    date: '2026-06-17',
+    items: [
+      '复习时每个词上方新增彩色倒计时进度条。',
+      '总览页可配置统一的复习倒计时时长（秒，0=关闭）。',
+      '倒计时归零且未评分，自动判为「彻底陌生」并跳到下一个。',
+    ],
+  },
+  {
     version: 'v1.3.0',
     date: '2026-06-16',
     items: [

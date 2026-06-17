@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { repo } from '../lib/db';
 import { getDueReviews, submitReview } from '../lib/wordService';
 import { generateExampleSentence } from '../lib/ai';
@@ -6,10 +6,11 @@ import type { Grade, Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
-export default function ReviewSession({ childId, lang, spellingOnly, onChanged }: {
+export default function ReviewSession({ childId, lang, spellingOnly, countdownSec, onChanged }: {
   childId: string;
   lang: Lang;
   spellingOnly: boolean;
+  countdownSec: number;
   onChanged: () => void;
 }) {
   const [queue, setQueue] = useState<Word[]>([]);
@@ -22,6 +23,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, onChanged }
   // 当前词"需要拼写/会写"的勾选意向；仅评分为"熟练"时才真正写入 needsSpelling。
   const [wantSpelling, setWantSpelling] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 倒计时剩余毫秒（仅显示用）。0 或 countdownSec<=0 时不启用倒计时。
+  const [remainMs, setRemainMs] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -51,6 +54,31 @@ export default function ReviewSession({ childId, lang, spellingOnly, onChanged }
     setWantSpelling(current?.needsSpelling ?? false);
   }, [current?.id]);
 
+  // 始终持有最新的 grade，供倒计时回调调用（避免把 grade 放进定时器依赖导致重置）
+  const gradeRef = useRef<(g: Grade) => void>(() => {});
+
+  // 倒计时：每个词展示时启动；归零且用户未评分则自动判「彻底陌生」并跳下一个
+  useEffect(() => {
+    if (!current || countdownSec <= 0) {
+      setRemainMs(0);
+      return;
+    }
+    const totalMs = countdownSec * 1000;
+    setRemainMs(totalMs);
+    const start = Date.now();
+    const id = window.setInterval(() => {
+      const left = totalMs - (Date.now() - start);
+      if (left <= 0) {
+        window.clearInterval(id);
+        setRemainMs(0);
+        gradeRef.current('forgotten');
+      } else {
+        setRemainMs(left);
+      }
+    }, 50);
+    return () => window.clearInterval(id);
+  }, [current?.id, countdownSec]);
+
   // 乐观更新：先切到下一张卡，保存放后台执行，失败再提示
   function grade(g: Grade) {
     if (!current) return;
@@ -70,6 +98,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, onChanged }
         setSaveError(`「${target.text}」保存失败：${e?.message || '请检查网络'}`);
       });
   }
+  gradeRef.current = grade;
 
   // 在队列中前后切换，不评分
   function goTo(i: number) {
@@ -203,6 +232,19 @@ export default function ReviewSession({ childId, lang, spellingOnly, onChanged }
           ›
         </button>
       </div>
+
+      {countdownSec > 0 && (() => {
+        const pct = Math.max(0, Math.min(100, (remainMs / (countdownSec * 1000)) * 100));
+        const hue = (pct / 100) * 120; // 120=绿(时间多) → 0=红(快超时)
+        return (
+          <div className="countdown-bar" title={`${(remainMs / 1000).toFixed(1)} 秒后自动判彻底陌生`}>
+            <div
+              className="countdown-bar-fill"
+              style={{ width: `${pct}%`, background: `hsl(${hue}, 80%, 50%)` }}
+            />
+          </div>
+        );
+      })()}
 
       {!spellingOnly && (
         <label className="check-label">

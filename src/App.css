@@ -220,6 +220,23 @@ button {
 .word-arrow:hover:not(:disabled) { color: #3a49d6; }
 .word-arrow:disabled { color: #d4d6e2; cursor: not-allowed; }
 
+.countdown-bar {
+  height: 12px;
+  border-radius: 6px;
+  background: #eceef6;
+  overflow: hidden;
+  margin: 4px 0 12px;
+}
+.countdown-bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.05s linear, background 0.2s linear;
+}
+.countdown-config {
+  margin-bottom: 12px;
+}
+.countdown-config .date-input { margin-bottom: 6px; }
+
 .word-table {
   width: 100%;
   border-collapse: collapse;
