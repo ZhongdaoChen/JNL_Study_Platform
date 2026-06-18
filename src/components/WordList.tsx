@@ -196,9 +196,11 @@ function matchFilter(w: Word, filter: WordFilter): boolean {
     case 'read-familiar':
       return w.repetitions >= READ_FAMILIAR_THRESHOLD;
     case 'spell-unfamiliar':
-      return w.spellingRepetitions < SPELLING_FAMILIAR_THRESHOLD;
+      return w.repetitions >= READ_FAMILIAR_THRESHOLD
+        && w.spellingRepetitions < SPELLING_FAMILIAR_THRESHOLD;
     case 'spell-familiar':
-      return w.spellingRepetitions >= SPELLING_FAMILIAR_THRESHOLD;
+      return w.repetitions >= READ_FAMILIAR_THRESHOLD
+        && w.spellingRepetitions >= SPELLING_FAMILIAR_THRESHOLD;
     default:
       return true;
   }

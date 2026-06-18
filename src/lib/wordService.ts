@@ -77,7 +77,7 @@ export async function getDueReviews(
   const t = today();
   const due = words
     .filter((w) => w.lang === lang)
-    .filter((w) => !spellingOnly || w.needsSpelling)
+    .filter((w) => !spellingOnly || w.repetitions >= READ_FAMILIAR_THRESHOLD)
     .filter((w) => dateLte(spellingOnly ? w.spellingDueDate : w.dueDate, t))
     .sort((a, b) => {
       const aDue = spellingOnly ? a.spellingDueDate : a.dueDate;
@@ -109,14 +109,11 @@ export async function submitReview(
       }
     : (() => {
         const readingState = applyReview(word, grade);
-        const justBecameFamiliar =
-          word.repetitions < READ_FAMILIAR_THRESHOLD &&
-          readingState.repetitions >= READ_FAMILIAR_THRESHOLD;
         return {
           ...word,
           ...readingState,
-          // 达到「已熟悉读」时自动加入拼写/会写队列；已加入过的保持不变。
-          needsSpelling: word.needsSpelling || justBecameFamiliar,
+          // 拼写/会写队列资格始终跟随读熟悉度：达到阈值加入，跌破阈值移出。
+          needsSpelling: readingState.repetitions >= READ_FAMILIAR_THRESHOLD,
         };
       })();
   // 两次写互不依赖，并行执行，减少一次网络往返的等待
