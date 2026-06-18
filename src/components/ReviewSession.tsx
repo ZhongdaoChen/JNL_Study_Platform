@@ -4,6 +4,7 @@ import { getDueReviews, submitReview } from '../lib/wordService';
 import { generateExampleSentence } from '../lib/ai';
 import type { Grade, Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
+import { today } from '../lib/date';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
 export default function ReviewSession({ childId, lang, spellingOnly, countdownSec, dailyLimit, onChanged }: {
@@ -21,8 +22,6 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   const [genError, setGenError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
-  // 当天被判「彻底陌生」后，需要在队尾再复习一遍的词 id。
-  const [retryWordIds, setRetryWordIds] = useState<Set<string>>(new Set());
   const [saveError, setSaveError] = useState<string | null>(null);
   // 倒计时剩余毫秒（仅显示用）。0 或 countdownSec<=0 时不启用倒计时。
   const [remainMs, setRemainMs] = useState(0);
@@ -38,7 +37,6 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
       setQueue(due);
       setIdx(0);
       setDoneCount(0);
-      setRetryWordIds(new Set());
       setShowExample(false);
       setGenError(null);
       setSaveError(null);
@@ -87,8 +85,10 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   // 乐观更新：先切到下一张卡，保存放后台执行，失败再提示
   function grade(g: Grade) {
     if (!current) return;
-    const currentId = current.id;
-    const isRetryAttempt = retryWordIds.has(currentId);
+    const todayStr = today();
+    const isRetryAttempt = spellingOnly
+      ? current.spellingLastGrade === 'forgotten' && current.spellingDueDate <= todayStr
+      : current.lastGrade === 'forgotten' && current.dueDate <= todayStr;
     setDoneCount((c) => c + 1);
     setShowExample(false);
     setGenError(null);
@@ -99,12 +99,6 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         setQueue((q) => {
           const next = q.map((w) => (w.id === updated.id ? updated : w));
           return g === 'forgotten' && !isRetryAttempt ? [...next, updated] : next;
-        });
-        setRetryWordIds((prev) => {
-          const next = new Set(prev);
-          if (g === 'forgotten' && !isRetryAttempt) next.add(currentId);
-          else if (isRetryAttempt) next.delete(currentId);
-          return next;
         });
         onChanged();
       })
@@ -151,11 +145,6 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     const target = current;
     await repo.deleteWord(target.id);
     setQueue((q) => q.filter((w) => w.id !== target.id));
-    setRetryWordIds((prev) => {
-      const next = new Set(prev);
-      next.delete(target.id);
-      return next;
-    });
     setShowExample(false);
     setGenError(null);
     onChanged();

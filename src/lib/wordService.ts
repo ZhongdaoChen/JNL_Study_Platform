@@ -96,6 +96,7 @@ export async function submitReview(
   spellingOnly: boolean = false,
   suppressRepetitionGain: boolean = false,
 ): Promise<Word> {
+  const todayStr = today();
   const tomorrow = addDays(today(), 1);
   const updated: Word = spellingOnly
     ? (() => {
@@ -114,6 +115,16 @@ export async function submitReview(
           word.lang === 'en' &&
           grade === 'forgotten' &&
           word.spellingLastGrade === 'forgotten';
+
+        if (grade === 'forgotten' && !suppressRepetitionGain) {
+          // 第一次彻底陌生：仍保留在今天，等待同日队尾再复习一遍
+          return {
+            ...word,
+            ...spellingState,
+            spellingInterval: 0,
+            spellingDueDate: todayStr,
+          };
+        }
 
         if (!consecutiveSpellingForgotten) {
           return {
@@ -143,6 +154,18 @@ export async function submitReview(
         const readingState = suppressRepetitionGain && grade !== 'forgotten'
           ? { ...rawReadingState, repetitions: word.repetitions }
           : rawReadingState;
+
+        if (grade === 'forgotten' && !suppressRepetitionGain) {
+          // 第一次彻底陌生：仍保留在今天，等待同日队尾再复习一遍
+          return {
+            ...word,
+            ...readingState,
+            interval: 0,
+            dueDate: todayStr,
+            needsSpelling: false,
+          };
+        }
+
         return {
           ...word,
           ...readingState,
