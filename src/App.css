@@ -252,6 +252,16 @@ button {
   margin-bottom: 12px;
 }
 .countdown-config .date-input { margin-bottom: 6px; }
+.config-inline {
+  display: flex;
+  align-items: center;
+  gap: 2ch;
+  flex-wrap: wrap;
+}
+.config-number-input {
+  width: 5ch;
+  min-width: 5ch;
+}
 
 .word-table {
   width: 100%;

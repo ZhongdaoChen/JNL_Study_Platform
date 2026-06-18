@@ -43,21 +43,23 @@ export default function Settings({
 
       <div className="countdown-config">
         <label className="field-label">复习倒计时（秒，留空 = 关闭）</label>
-        <input
-          className="date-input"
-          type="text"
-          inputMode="numeric"
-          placeholder="留空关闭"
-          value={countdownText}
-          onChange={(e) => handleCountdownChange(e.target.value)}
-        />
-        <span className="hint">超时未评分将自动判为「彻底陌生」并跳到下一个。</span>
+        <div className="config-inline">
+          <input
+            className="date-input config-number-input"
+            type="text"
+            inputMode="numeric"
+            placeholder="留空关闭"
+            value={countdownText}
+            onChange={(e) => handleCountdownChange(e.target.value)}
+          />
+          <span className="hint">超时未评分将自动判为「彻底陌生」并跳到下一个。</span>
+        </div>
       </div>
 
       <div className="countdown-config">
         <label className="field-label">英文读每天最大个数（留空 = 不限）</label>
         <input
-          className="date-input"
+          className="date-input config-number-input"
           type="text"
           inputMode="numeric"
           placeholder="留空不限"
@@ -69,7 +71,7 @@ export default function Settings({
       <div className="countdown-config">
         <label className="field-label">英文拼每天最大个数（留空 = 不限）</label>
         <input
-          className="date-input"
+          className="date-input config-number-input"
           type="text"
           inputMode="numeric"
           placeholder="留空不限"
@@ -81,7 +83,7 @@ export default function Settings({
       <div className="countdown-config">
         <label className="field-label">中文读每天最大个数（留空 = 不限）</label>
         <input
-          className="date-input"
+          className="date-input config-number-input"
           type="text"
           inputMode="numeric"
           placeholder="留空不限"
@@ -93,7 +95,7 @@ export default function Settings({
       <div className="countdown-config">
         <label className="field-label">中文写每天最大个数（留空 = 不限）</label>
         <input
-          className="date-input"
+          className="date-input config-number-input"
           type="text"
           inputMode="numeric"
           placeholder="留空不限"
