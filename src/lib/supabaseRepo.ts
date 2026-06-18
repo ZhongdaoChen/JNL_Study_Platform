@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Child, ReviewLog, Sentence, Word } from './types';
 import type { Repo } from './repo';
+import { initialSpellingReviewState } from './sm2';
 
 // Supabase 实现：数据存云端 Postgres，RLS 自动按登录用户隔离。
 // UI 通过 Repo 接口调用，与 LocalRepo 完全可互换。
@@ -13,6 +14,16 @@ function rowToSentence(r: any): Sentence {
   return { id: r.id, childId: r.child_id, text: r.text, createdAt: r.created_at };
 }
 function rowToWord(r: any): Word {
+  const spelling = r.spelling_due_date
+    ? {
+        spellingInterval: r.spelling_interval,
+        spellingEf: r.spelling_ef,
+        spellingRepetitions: r.spelling_repetitions,
+        spellingDueDate: r.spelling_due_date,
+        spellingLastGrade: r.spelling_last_grade,
+        spellingLastReviewedAt: r.spelling_last_reviewed_at,
+      }
+    : initialSpellingReviewState();
   return {
     id: r.id,
     childId: r.child_id,
@@ -28,6 +39,7 @@ function rowToWord(r: any): Word {
     dueDate: r.due_date,
     lastGrade: r.last_grade,
     lastReviewedAt: r.last_reviewed_at,
+    ...spelling,
   };
 }
 
@@ -105,6 +117,12 @@ export class SupabaseRepo implements Repo {
       due_date: word.dueDate,
       last_grade: word.lastGrade,
       last_reviewed_at: word.lastReviewedAt,
+      spelling_interval: word.spellingInterval,
+      spelling_ef: word.spellingEf,
+      spelling_repetitions: word.spellingRepetitions,
+      spelling_due_date: word.spellingDueDate,
+      spelling_last_grade: word.spellingLastGrade,
+      spelling_last_reviewed_at: word.spellingLastReviewedAt,
     });
     if (error) this.fail('upsertWord', error);
   }

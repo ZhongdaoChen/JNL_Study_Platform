@@ -22,6 +22,7 @@ const REVIEW_MODES: { key: ReviewMode; label: string; lang: Lang; spellingOnly: 
   { key: 'zh-read', label: '中文读', lang: 'zh', spellingOnly: false },
   { key: 'zh-write', label: '中文写', lang: 'zh', spellingOnly: true },
 ];
+type ReviewLimits = Record<ReviewMode, number>;
 
 // 工作区：登录后（或本地模式）显示的主体。管理孩子档案与三大模块。
 export default function Workspace({ onCompactChange }: { onCompactChange: (compact: boolean) => void }) {
@@ -41,10 +42,21 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
     const v = Number(localStorage.getItem('review-countdown-sec'));
     return Number.isFinite(v) && v > 0 ? v : 0;
   });
+  const [dailyLimits, setDailyLimits] = useState<ReviewLimits>(() => ({
+    'en-read': readStoredPositiveInt('review-limit-en-read'),
+    'en-spell': readStoredPositiveInt('review-limit-en-spell'),
+    'zh-read': readStoredPositiveInt('review-limit-zh-read'),
+    'zh-write': readStoredPositiveInt('review-limit-zh-write'),
+  }));
   const setCountdownSec = (n: number) => {
     const v = Math.max(0, Math.floor(Number(n) || 0));
     setCountdownSecState(v);
     localStorage.setItem('review-countdown-sec', String(v));
+  };
+  const setDailyLimit = (mode: ReviewMode, n: number) => {
+    const v = Math.max(0, Math.floor(Number(n) || 0));
+    setDailyLimits((prev) => ({ ...prev, [mode]: v }));
+    localStorage.setItem(`review-limit-${mode}`, String(v));
   };
 
   useEffect(() => {
@@ -155,6 +167,7 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
                     lang={m.lang}
                     spellingOnly={m.spellingOnly}
                     countdownSec={countdownSec}
+                    dailyLimit={dailyLimits[m.key]}
                     onChanged={bump}
                   />
                 );
@@ -184,11 +197,21 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
           )}
           {tab === 'stats' && <StatsBoard childId={activeChild} refreshKey={refreshKey} />}
           {tab === 'settings' && (
-            <Settings countdownSec={countdownSec} onCountdownChange={setCountdownSec} />
+            <Settings
+              countdownSec={countdownSec}
+              onCountdownChange={setCountdownSec}
+              dailyLimits={dailyLimits}
+              onDailyLimitChange={setDailyLimit}
+            />
           )}
           {tab === 'admin' && isAdmin && <AdminPanel />}
         </>
       )}
     </>
   );
+}
+
+function readStoredPositiveInt(key: string): number {
+  const v = Number(localStorage.getItem(key));
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
 }

@@ -6,11 +6,12 @@ import type { Grade, Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
-export default function ReviewSession({ childId, lang, spellingOnly, countdownSec, onChanged }: {
+export default function ReviewSession({ childId, lang, spellingOnly, countdownSec, dailyLimit, onChanged }: {
   childId: string;
   lang: Lang;
   spellingOnly: boolean;
   countdownSec: number;
+  dailyLimit: number;
   onChanged: () => void;
 }) {
   const [queue, setQueue] = useState<Word[]>([]);
@@ -20,7 +21,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   const [genError, setGenError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
-  // 当前词"需要拼写/会写"的勾选意向；仅评分为"熟练"时才真正写入 needsSpelling。
+  // 当前词"需要拼写/会写"的勾选意向；阅读模式下新勾选时，仅评分为"熟练"才真正加入拼写/会写。
   const [wantSpelling, setWantSpelling] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   // 倒计时剩余毫秒（仅显示用）。0 或 countdownSec<=0 时不启用倒计时。
@@ -32,7 +33,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     let active = true;
     (async () => {
       setLoading(true);
-      const due = await getDueReviews(repo, childId, lang, spellingOnly);
+      const due = await getDueReviews(repo, childId, lang, spellingOnly, dailyLimit);
       if (!active) return;
       setQueue(due);
       setIdx(0);
@@ -47,7 +48,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     };
     // 进入复习页/切换孩子/切换语言时各加载一次队列；
     // 评分过程中不重载，避免进度被重置（onChanged 只用于刷新其他标签）。
-  }, [childId, lang, spellingOnly]);
+  }, [childId, lang, spellingOnly, dailyLimit]);
 
   const current = queue[idx];
 
@@ -90,14 +91,18 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   // 乐观更新：先切到下一张卡，保存放后台执行，失败再提示
   function grade(g: Grade) {
     if (!current) return;
-    // 仅"熟练"才把勾选的"需要拼写/会写"真正落库；否则暂不加入
-    const target: Word = { ...current, needsSpelling: wantSpelling && g === 'mastered' };
+    const nextNeedsSpelling = spellingOnly
+      ? current.needsSpelling
+      : wantSpelling
+        ? current.needsSpelling || g === 'mastered'
+        : false;
+    const target: Word = { ...current, needsSpelling: nextNeedsSpelling };
     setDoneCount((c) => c + 1);
     setShowExample(false);
     setGenError(null);
     setSaveError(null);
     setIdx((i) => i + 1);
-    submitReview(repo, target, g)
+    submitReview(repo, target, g, spellingOnly)
       .then((updated) => {
         setQueue((q) => q.map((w) => (w.id === updated.id ? updated : w)));
         onChanged();
@@ -150,7 +155,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     onChanged();
   }
 
-  // 切换当前词的"需要拼写/会写"勾选意向（仅本地，评分熟练时才落库）
+  // 切换当前词的"需要拼写/会写"勾选意向（阅读模式下仅本地，评分时决定是否真正加入）
   function toggleSpelling() {
     setWantSpelling((v) => !v);
   }

@@ -1,7 +1,7 @@
 import type { Grade, Lang, Sentence, Word } from './types';
 import type { Repo } from './repo';
 import { tokenizeByLang } from './tokenizer';
-import { applyReview, initialReviewState } from './sm2';
+import { applyReview, initialReviewState, initialSpellingReviewState } from './sm2';
 import { dateLte, today } from './date';
 
 // 业务服务层：把"拆词 + SM-2 + 仓储"组合成模块要用的高层操作。
@@ -45,6 +45,7 @@ export async function addLearning(
         needsSpelling: false,
         exampleSentence: null,
         ...initialReviewState(learnedOn),
+        ...initialSpellingReviewState(),
       };
       await repo.upsertWord(word);
       byText.set(t, word);
@@ -65,17 +66,21 @@ export async function getDueReviews(
   childId: string,
   lang: Lang = 'en',
   spellingOnly: boolean = false,
+  maxCount: number = 0,
 ): Promise<Word[]> {
   const words = await repo.getWords(childId);
   const t = today();
-  return words
+  const due = words
     .filter((w) => w.lang === lang)
     .filter((w) => !spellingOnly || w.needsSpelling)
-    .filter((w) => dateLte(w.dueDate, t))
+    .filter((w) => dateLte(spellingOnly ? w.spellingDueDate : w.dueDate, t))
     .sort((a, b) => {
-      if (a.dueDate !== b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
+      const aDue = spellingOnly ? a.spellingDueDate : a.dueDate;
+      const bDue = spellingOnly ? b.spellingDueDate : b.dueDate;
+      if (aDue !== bDue) return aDue < bDue ? -1 : 1;
       return a.text < b.text ? -1 : a.text > b.text ? 1 : 0;
     });
+  return maxCount > 0 ? due.slice(0, maxCount) : due;
 }
 
 // 模块3：提交复习反馈，更新 SM-2 状态并记日志
@@ -83,8 +88,24 @@ export async function submitReview(
   repo: Repo,
   word: Word,
   grade: Grade,
+  spellingOnly: boolean = false,
 ): Promise<Word> {
-  const updated: Word = { ...word, ...applyReview(word, grade) };
+  const updated: Word = spellingOnly
+    ? {
+        ...word,
+        ...mapSpellingState(applyReview(
+          {
+            interval: word.spellingInterval,
+            ef: word.spellingEf,
+            repetitions: word.spellingRepetitions,
+          },
+          grade,
+        )),
+      }
+    : {
+        ...word,
+        ...applyReview(word, grade),
+      };
   // 两次写互不依赖，并行执行，减少一次网络往返的等待
   await Promise.all([
     repo.upsertWord(updated),
@@ -97,4 +118,18 @@ export async function submitReview(
     }),
   ]);
   return updated;
+}
+
+function mapSpellingState(state: ReturnType<typeof applyReview>): Pick<
+  Word,
+  'spellingInterval' | 'spellingEf' | 'spellingRepetitions' | 'spellingDueDate' | 'spellingLastGrade' | 'spellingLastReviewedAt'
+> {
+  return {
+    spellingInterval: state.interval,
+    spellingEf: state.ef,
+    spellingRepetitions: state.repetitions,
+    spellingDueDate: state.dueDate,
+    spellingLastGrade: state.lastGrade,
+    spellingLastReviewedAt: state.lastReviewedAt,
+  };
 }

@@ -45,6 +45,21 @@ export function initialReviewState(learnedOn: string = today()): Pick<
   };
 }
 
+// 拼写/会写独立进度的初始状态：当天即可进入拼写队列
+export function initialSpellingReviewState(on: string = today()): Pick<
+  Word,
+  'spellingInterval' | 'spellingEf' | 'spellingRepetitions' | 'spellingDueDate' | 'spellingLastGrade' | 'spellingLastReviewedAt'
+> {
+  return {
+    spellingInterval: 0,
+    spellingEf: SM2_CONFIG.INITIAL_EF,
+    spellingRepetitions: 0,
+    spellingDueDate: on,
+    spellingLastGrade: null,
+    spellingLastReviewedAt: null,
+  };
+}
+
 // 复习后更新该词的 SM-2 状态。纯函数，返回需要更新的字段。
 export function applyReview(
   word: Pick<Word, 'interval' | 'ef' | 'repetitions'>,

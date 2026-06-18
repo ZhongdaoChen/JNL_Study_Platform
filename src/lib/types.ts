@@ -55,6 +55,14 @@ export interface Word {
   dueDate: string; // 下次复习日期 (YYYY-MM-DD)
   lastGrade: Grade | null;
   lastReviewedAt: string | null;
+
+  // ---- 拼写 / 会写 的独立进度 ----
+  spellingInterval: number;
+  spellingEf: number;
+  spellingRepetitions: number;
+  spellingDueDate: string;
+  spellingLastGrade: Grade | null;
+  spellingLastReviewedAt: string | null;
 }
 
 // 每次复习的日志（用于以后看进步曲线）

@@ -7,6 +7,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v1.5.0',
+    date: '2026-06-18',
+    items: [
+      '英文拼 / 中文写改为独立复习进度，不再和英文读 / 中文读共用同一个到期日。',
+      '配置页新增四个每日最大个数：英文读、英文拼、中文读、中文写都可分别限制。',
+    ],
+  },
+  {
     version: 'v1.4.0',
     date: '2026-06-17',
     items: [

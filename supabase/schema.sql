@@ -40,6 +40,12 @@ create table if not exists words (
   due_date date not null,
   last_grade text,
   last_reviewed_at timestamptz,
+  spelling_interval int not null default 0,
+  spelling_ef real not null default 2.5,
+  spelling_repetitions int not null default 0,
+  spelling_due_date date not null default current_date,
+  spelling_last_grade text,
+  spelling_last_reviewed_at timestamptz,
   unique (child_id, text)
 );
 
@@ -47,6 +53,12 @@ create table if not exists words (
 alter table words add column if not exists example_sentence text;
 alter table words add column if not exists lang text not null default 'en';
 alter table words add column if not exists needs_spelling boolean not null default false;
+alter table words add column if not exists spelling_interval int not null default 0;
+alter table words add column if not exists spelling_ef real not null default 2.5;
+alter table words add column if not exists spelling_repetitions int not null default 0;
+alter table words add column if not exists spelling_due_date date not null default current_date;
+alter table words add column if not exists spelling_last_grade text;
+alter table words add column if not exists spelling_last_reviewed_at timestamptz;
 
 -- 复习日志
 create table if not exists review_logs (
@@ -68,6 +80,7 @@ create table if not exists feedback (
 create index if not exists idx_sentences_child on sentences (child_id);
 create index if not exists idx_words_child on words (child_id);
 create index if not exists idx_words_due on words (child_id, due_date);
+create index if not exists idx_words_spelling_due on words (child_id, spelling_due_date);
 create index if not exists idx_logs_child on review_logs (child_id);
 create index if not exists idx_feedback_owner on feedback (owner);
 
