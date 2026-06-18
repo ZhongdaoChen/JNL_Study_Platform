@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { repo } from '../lib/db';
 import { computeStats, type Stats } from '../lib/statsService';
 
-// 学习统计看板：打卡、掌握进度、近 7 天复习趋势
+// 学习统计看板：打卡、熟悉进度、近 7 天复习趋势
 export default function StatsBoard({ childId, refreshKey }: { childId: string; refreshKey: number }) {
   const [stats, setStats] = useState<Stats | null>(null);
 
@@ -41,7 +41,7 @@ export default function StatsBoard({ childId, refreshKey }: { childId: string; r
         </div>
         <div className="stat-box">
           <div className="stat-num">{stats.masteredWords}</div>
-          <div className="stat-label">已掌握</div>
+          <div className="stat-label">已熟悉读</div>
         </div>
         <div className="stat-box">
           <div className="stat-num">{stats.dueToday}</div>
@@ -51,13 +51,13 @@ export default function StatsBoard({ childId, refreshKey }: { childId: string; r
 
       <div className="master-bar-wrap">
         <div className="master-bar-head">
-          <span>掌握进度</span>
+          <span>熟悉进度</span>
           <span>{stats.masteredWords} / {stats.totalWords}（{masterRate}%）</span>
         </div>
         <div className="master-bar">
           <div className="master-bar-fill" style={{ width: `${masterRate}%` }} />
         </div>
-        <p className="hint">连续答对 3 次即视为「已掌握」。</p>
+        <p className="hint">熟练 +1，略陌生 -1（最低到 0），彻底陌生清零；repetitions 到 4 视为「已熟悉读」。</p>
       </div>
 
       <h3 className="trend-title">近 7 天复习</h3>

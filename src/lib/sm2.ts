@@ -22,6 +22,8 @@ export const SM2_CONFIG = {
   FUZZY_GROWTH: 1.3, // 略陌生时的温和增长系数
 };
 
+export const READ_FAMILIAR_THRESHOLD = 4; // repetitions 达到 4 视为「已熟悉读」
+
 function clampEf(ef: number): number {
   return Math.max(SM2_CONFIG.MIN_EF, ef);
 }
@@ -68,29 +70,28 @@ export function applyReview(
 ): Pick<Word, 'interval' | 'ef' | 'repetitions' | 'dueDate' | 'lastGrade' | 'lastReviewedAt'> {
   let { interval, ef, repetitions } = word;
 
+  const prevInterval = interval;
+
   if (grade === 'forgotten') {
     // 彻底陌生：归零，明日重学
     repetitions = 0;
     ef = clampEf(ef + SM2_CONFIG.EF_DELTA_FORGOTTEN);
     interval = 1;
-  } else {
-    // 熟练 / 略陌生：都算"记得"，连续答对次数 +1
+  } else if (grade === 'mastered') {
+    // 熟练：连续答对次数 +1
     repetitions += 1;
-    const prevInterval = interval;
-
-    if (grade === 'mastered') {
-      ef = clampEf(ef + SM2_CONFIG.EF_DELTA_MASTERED);
-      if (repetitions === 1) interval = 1; // 次日
-      else if (repetitions === 2) interval = 3; // 2-3 天
-      else interval = Math.round(prevInterval * ef);
-    } else {
-      // fuzzy 略陌生：温和增长，因子小幅下降
-      ef = clampEf(ef + SM2_CONFIG.EF_DELTA_FUZZY);
-      if (repetitions === 1) interval = 1;
-      else if (repetitions === 2) interval = 2;
-      else interval = Math.round(prevInterval * SM2_CONFIG.FUZZY_GROWTH);
-    }
-
+    ef = clampEf(ef + SM2_CONFIG.EF_DELTA_MASTERED);
+    if (repetitions === 1) interval = 1; // 次日
+    else if (repetitions === 2) interval = 3; // 2-3 天
+    else interval = Math.round(prevInterval * ef);
+    interval = clampInterval(interval);
+  } else {
+    // fuzzy 略陌生：连续答对次数 -1（最低到 0），并缩短下次间隔
+    repetitions = Math.max(0, repetitions - 1);
+    ef = clampEf(ef + SM2_CONFIG.EF_DELTA_FUZZY);
+    if (repetitions <= 1) interval = 1;
+    else if (repetitions === 2) interval = 2;
+    else interval = Math.max(2, Math.round(prevInterval / SM2_CONFIG.FUZZY_GROWTH));
     interval = clampInterval(interval);
   }
 

@@ -1,5 +1,6 @@
 import type { ReviewLog, Word } from './types';
 import { today, toDateStr } from './date';
+import { READ_FAMILIAR_THRESHOLD } from './sm2';
 
 // 把任意时间戳（ISO 或 YYYY-MM-DD）归一化成日期字符串
 function dayOf(ts: string): string {
@@ -8,7 +9,7 @@ function dayOf(ts: string): string {
 
 export interface Stats {
   totalWords: number;
-  masteredWords: number; // 已掌握（连续答对 >= 阈值）
+  masteredWords: number; // 已熟悉读（repetitions >= 阈值）
   learningWords: number; // 学习中
   dueToday: number; // 今日待复习
   reviewsTotal: number; // 累计复习次数
@@ -17,12 +18,10 @@ export interface Stats {
   gradeBreakdown: { mastered: number; fuzzy: number; forgotten: number }; // 各档累计次数
 }
 
-const MASTER_THRESHOLD = 3; // 连续答对 3 次视为已掌握
-
 export function computeStats(words: Word[], logs: ReviewLog[]): Stats {
   const t = today();
 
-  const masteredWords = words.filter((w) => w.repetitions >= MASTER_THRESHOLD).length;
+  const masteredWords = words.filter((w) => w.repetitions >= READ_FAMILIAR_THRESHOLD).length;
   const dueToday = words.filter((w) => w.dueDate <= t).length;
 
   // 各档累计次数

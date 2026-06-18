@@ -93,9 +93,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     if (!current) return;
     const nextNeedsSpelling = spellingOnly
       ? current.needsSpelling
-      : wantSpelling
-        ? current.needsSpelling || g === 'mastered'
-        : false;
+      : current.needsSpelling || (wantSpelling && g === 'mastered');
     const target: Word = { ...current, needsSpelling: nextNeedsSpelling };
     setDoneCount((c) => c + 1);
     setShowExample(false);

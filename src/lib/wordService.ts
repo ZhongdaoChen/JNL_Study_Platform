@@ -1,7 +1,12 @@
 import type { Grade, Lang, Sentence, Word } from './types';
 import type { Repo } from './repo';
 import { tokenizeByLang } from './tokenizer';
-import { applyReview, initialReviewState, initialSpellingReviewState } from './sm2';
+import {
+  applyReview,
+  initialReviewState,
+  initialSpellingReviewState,
+  READ_FAMILIAR_THRESHOLD,
+} from './sm2';
 import { dateLte, today } from './date';
 
 // 业务服务层：把"拆词 + SM-2 + 仓储"组合成模块要用的高层操作。
@@ -102,10 +107,18 @@ export async function submitReview(
           grade,
         )),
       }
-    : {
-        ...word,
-        ...applyReview(word, grade),
-      };
+    : (() => {
+        const readingState = applyReview(word, grade);
+        const justBecameFamiliar =
+          word.repetitions < READ_FAMILIAR_THRESHOLD &&
+          readingState.repetitions >= READ_FAMILIAR_THRESHOLD;
+        return {
+          ...word,
+          ...readingState,
+          // 达到「已熟悉读」时自动加入拼写/会写队列；已加入过的保持不变。
+          needsSpelling: word.needsSpelling || justBecameFamiliar,
+        };
+      })();
   // 两次写互不依赖，并行执行，减少一次网络往返的等待
   await Promise.all([
     repo.upsertWord(updated),
