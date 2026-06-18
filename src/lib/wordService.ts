@@ -94,10 +94,11 @@ export async function submitReview(
   word: Word,
   grade: Grade,
   spellingOnly: boolean = false,
+  suppressRepetitionGain: boolean = false,
 ): Promise<Word> {
   const updated: Word = spellingOnly
     ? (() => {
-        const spellingState = mapSpellingState(applyReview(
+        const rawSpellingState = mapSpellingState(applyReview(
           {
             interval: word.spellingInterval,
             ef: word.spellingEf,
@@ -105,6 +106,9 @@ export async function submitReview(
           },
           grade,
         ));
+        const spellingState = suppressRepetitionGain && grade !== 'forgotten'
+          ? { ...rawSpellingState, spellingRepetitions: word.spellingRepetitions }
+          : rawSpellingState;
         const consecutiveSpellingForgotten =
           word.lang === 'en' &&
           grade === 'forgotten' &&
@@ -130,7 +134,10 @@ export async function submitReview(
         };
       })()
     : (() => {
-        const readingState = applyReview(word, grade);
+        const rawReadingState = applyReview(word, grade);
+        const readingState = suppressRepetitionGain && grade !== 'forgotten'
+          ? { ...rawReadingState, repetitions: word.repetitions }
+          : rawReadingState;
         return {
           ...word,
           ...readingState,
