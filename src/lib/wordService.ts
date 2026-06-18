@@ -7,7 +7,7 @@ import {
   initialSpellingReviewState,
   READ_FAMILIAR_THRESHOLD,
 } from './sm2';
-import { dateLte, today } from './date';
+import { addDays, dateLte, today } from './date';
 
 // 业务服务层：把"拆词 + SM-2 + 仓储"组合成模块要用的高层操作。
 
@@ -96,6 +96,7 @@ export async function submitReview(
   spellingOnly: boolean = false,
   suppressRepetitionGain: boolean = false,
 ): Promise<Word> {
+  const tomorrow = addDays(today(), 1);
   const updated: Word = spellingOnly
     ? (() => {
         const rawSpellingState = mapSpellingState(applyReview(
@@ -118,6 +119,10 @@ export async function submitReview(
           return {
             ...word,
             ...spellingState,
+            ...(suppressRepetitionGain ? {
+              spellingInterval: 1,
+              spellingDueDate: tomorrow,
+            } : {}),
           };
         }
 
@@ -128,7 +133,7 @@ export async function submitReview(
           ...spellingState,
           repetitions: READ_FAMILIAR_THRESHOLD - 1,
           interval: 1,
-          dueDate: today(),
+          dueDate: tomorrow,
           needsSpelling: false,
           ...initialSpellingReviewState(),
         };
@@ -141,6 +146,10 @@ export async function submitReview(
         return {
           ...word,
           ...readingState,
+          ...(suppressRepetitionGain ? {
+            interval: 1,
+            dueDate: tomorrow,
+          } : {}),
           // 拼写/会写队列资格始终跟随读熟悉度：达到阈值加入，跌破阈值移出。
           needsSpelling: readingState.repetitions >= READ_FAMILIAR_THRESHOLD,
         };
