@@ -25,6 +25,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   const [saveError, setSaveError] = useState<string | null>(null);
   // 倒计时剩余毫秒（仅显示用）。0 或 countdownSec<=0 时不启用倒计时。
   const [remainMs, setRemainMs] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const remainRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -57,27 +59,33 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   // 始终持有最新的 grade，供倒计时回调调用（避免把 grade 放进定时器依赖导致重置）
   const gradeRef = useRef<(g: Grade) => void>(() => {});
 
+  // 切换词或修改配置时重置倒计时
+  useEffect(() => {
+    const totalMs = countdownSec * 1000;
+    remainRef.current = current && countdownSec > 0 ? totalMs : 0;
+    setRemainMs(remainRef.current);
+    setIsPaused(false);
+  }, [current?.id, countdownSec]);
+
   // 倒计时：每个词展示时启动；归零且用户未评分则自动判「彻底陌生」并跳下一个
   useEffect(() => {
-    if (!current || countdownSec <= 0) {
-      setRemainMs(0);
-      return;
-    }
-    const totalMs = countdownSec * 1000;
-    setRemainMs(totalMs);
+    if (!current || countdownSec <= 0 || isPaused || remainRef.current <= 0) return;
+    const startRemain = remainRef.current;
     const start = Date.now();
     const id = window.setInterval(() => {
-      const left = totalMs - (Date.now() - start);
+      const left = startRemain - (Date.now() - start);
       if (left <= 0) {
         window.clearInterval(id);
+        remainRef.current = 0;
         setRemainMs(0);
         gradeRef.current('forgotten');
       } else {
+        remainRef.current = left;
         setRemainMs(left);
       }
     }, 50);
     return () => window.clearInterval(id);
-  }, [current?.id, countdownSec]);
+  }, [current?.id, countdownSec, isPaused]);
 
   // 乐观更新：先切到下一张卡，保存放后台执行，失败再提示
   function grade(g: Grade) {
@@ -147,6 +155,11 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     setWantSpelling((v) => !v);
   }
 
+  function togglePause() {
+    if (countdownSec <= 0) return;
+    setIsPaused((v) => !v);
+  }
+
   const unit = lang === 'zh' ? '字' : '单词';
   const modeLabel = spellingOnly ? (lang === 'zh' ? '会写' : '拼写') : '复习';
 
@@ -158,7 +171,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         <h2>🔁 今日{modeLabel}</h2>
         <p className="hint">
           {spellingOnly
-            ? `今天没有需要${modeLabel}的${unit}，太棒了！可在录入时勾选「${lang === 'zh' ? '需要会写' : '需要拼写'}」。`
+            ? `今天没有需要${modeLabel}的${unit}，太棒了！可在${lang === 'zh' ? '中文读' : '英文读'}里勾选「${lang === 'zh' ? '需要会写' : '需要拼写'}」。`
             : `今天没有需要复习的${unit}，太棒了！去录入新内容吧。`}
         </p>
       </div>
@@ -182,9 +195,26 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
 
   return (
     <div className="card review-card">
-      <button className="review-del-btn" onClick={deleteCurrent} title={`删除该${unit}`}>
-        🗑 删除
-      </button>
+      <div className="review-actions">
+        {countdownSec > 0 && (
+          <button
+            className="review-icon-btn"
+            onClick={togglePause}
+            title={isPaused ? '继续倒计时' : '暂停倒计时'}
+            aria-label={isPaused ? '继续倒计时' : '暂停倒计时'}
+          >
+            {isPaused ? '▶' : '⏸'}
+          </button>
+        )}
+        <button
+          className="review-icon-btn review-del-btn"
+          onClick={deleteCurrent}
+          title={`删除该${unit}`}
+          aria-label={`删除该${unit}`}
+        >
+          🗑
+        </button>
+      </div>
       <h2>🔁 今日{modeLabel}（共 {queue.length} 个）</h2>
       <p className="hint">第 {idx + 1} / {queue.length} 个 · {action}</p>
 
@@ -237,7 +267,10 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         const pct = Math.max(0, Math.min(100, (remainMs / (countdownSec * 1000)) * 100));
         const hue = (pct / 100) * 120; // 120=绿(时间多) → 0=红(快超时)
         return (
-          <div className="countdown-bar" title={`${(remainMs / 1000).toFixed(1)} 秒后自动判彻底陌生`}>
+          <div
+            className={`countdown-bar${isPaused ? ' paused' : ''}`}
+            title={isPaused ? '倒计时已暂停' : `${(remainMs / 1000).toFixed(1)} 秒后自动判彻底陌生`}
+          >
             <div
               className="countdown-bar-fill"
               style={{ width: `${pct}%`, background: `hsl(${hue}, 80%, 50%)` }}
