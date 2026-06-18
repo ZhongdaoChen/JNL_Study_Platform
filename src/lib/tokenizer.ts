@@ -1,7 +1,7 @@
 // 拆词引擎：把一句话拆成规范化的单词列表
 //
 // 设计目标（面向 5 岁儿童的英文学习）：
-// - 小写化，去掉句首大写差异
+// - 先小写化去重，再统一转成首字母大写显示/存储
 // - 去除标点（句号、逗号、问号、引号等）
 // - 处理常见缩写（don't / it's 等）保留为一个词
 // - 过滤纯数字与空字符串
@@ -13,7 +13,12 @@ const PUNCTUATION = /[.,!?;:"“”‘’()\[\]{}…]/g;
 // 借此排除 6/10（日期）、123、a1、cat/dog 等非单词 token
 const WORD_RE = /^[a-z]+(?:[-'][a-z]+)*$/;
 
-// 规范化单个 token
+// 英文单词统一显示/存储为首字母大写
+export function capitalizeWord(word: string): string {
+  return word ? word[0].toUpperCase() + word.slice(1) : word;
+}
+
+// 规范化单个 token（先转成小写，便于大小写无关去重）
 export function normalizeWord(raw: string): string {
   return raw
     .toLowerCase()
@@ -30,12 +35,12 @@ export function tokenize(sentence: string): string[] {
   const result: string[] = [];
 
   for (const raw of rawTokens) {
-    const word = normalizeWord(raw);
-    if (!word) continue;
-    if (!WORD_RE.test(word)) continue; // 只保留真正的英文单词
-    if (seen.has(word)) continue;
-    seen.add(word);
-    result.push(word);
+    const normalized = normalizeWord(raw);
+    if (!normalized) continue;
+    if (!WORD_RE.test(normalized)) continue; // 只保留真正的英文单词
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(capitalizeWord(normalized));
   }
 
   return result;

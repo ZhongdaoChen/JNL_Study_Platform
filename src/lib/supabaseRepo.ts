@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Child, ReviewLog, Sentence, Word } from './types';
 import type { Repo } from './repo';
 import { initialSpellingReviewState } from './sm2';
+import { capitalizeWord } from './tokenizer';
 
 // Supabase 实现：数据存云端 Postgres，RLS 自动按登录用户隔离。
 // UI 通过 Repo 接口调用，与 LocalRepo 完全可互换。
@@ -27,7 +28,7 @@ function rowToWord(r: any): Word {
   return {
     id: r.id,
     childId: r.child_id,
-    text: r.text,
+    text: (r.lang ?? 'en') === 'en' ? capitalizeWord(r.text) : r.text,
     lang: r.lang ?? 'en',
     sentenceIds: r.sentence_ids ?? [],
     firstLearnedAt: r.first_learned_at,

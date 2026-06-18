@@ -1,6 +1,7 @@
 import type { Child, ReviewLog, Sentence, Word } from './types';
 import type { Repo } from './repo';
 import { initialSpellingReviewState } from './sm2';
+import { capitalizeWord } from './tokenizer';
 
 // 本地存储实现：数据保存在浏览器 localStorage。
 // 用于无后台时立即试用；接入 Supabase 后改用 SupabaseRepo 即可多设备同步。
@@ -73,6 +74,7 @@ export class LocalRepo implements Repo {
       .words.filter((w) => w.childId === childId)
       .map((w) => ({
         ...w,
+        text: (w.lang ?? 'en') === 'en' ? capitalizeWord(w.text) : w.text,
         lang: w.lang ?? 'en',
         needsSpelling: w.needsSpelling ?? false,
         ...(w.spellingDueDate ? {} : initialSpellingReviewState()),
