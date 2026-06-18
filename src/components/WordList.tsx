@@ -172,8 +172,8 @@ export default function WordList({ childId, lang, refreshKey }: {
                 <td>{w.text}</td>
                 <td>{w.dueDate}</td>
                 <td>{w.interval}</td>
-                <td>{w.repetitions}</td>
-                <td>{w.spellingRepetitions}</td>
+                <td>{formatReadProficiency(w.repetitions)}</td>
+                <td>{formatSpellingProficiency(w.spellingRepetitions)}</td>
                 <td>{w.lastGrade ? GRADE_LABELS[w.lastGrade] : '—'}</td>
                 <td>
                   <button className="del-btn" onClick={() => deleteOne(w)} title="删除单词">
@@ -204,4 +204,14 @@ function matchFilter(w: Word, filter: WordFilter): boolean {
     default:
       return true;
   }
+}
+
+function formatReadProficiency(repetitions: number): string {
+  const pct = Math.min(100, Math.max(0, repetitions) * 25);
+  return `${pct}%`;
+}
+
+function formatSpellingProficiency(repetitions: number): string {
+  const pct = Math.min(100, Math.max(0, repetitions) * 20);
+  return `${pct}%`;
 }
