@@ -96,17 +96,39 @@ export async function submitReview(
   spellingOnly: boolean = false,
 ): Promise<Word> {
   const updated: Word = spellingOnly
-    ? {
-        ...word,
-        ...mapSpellingState(applyReview(
+    ? (() => {
+        const spellingState = mapSpellingState(applyReview(
           {
             interval: word.spellingInterval,
             ef: word.spellingEf,
             repetitions: word.spellingRepetitions,
           },
           grade,
-        )),
-      }
+        ));
+        const consecutiveSpellingForgotten =
+          word.lang === 'en' &&
+          grade === 'forgotten' &&
+          word.spellingLastGrade === 'forgotten';
+
+        if (!consecutiveSpellingForgotten) {
+          return {
+            ...word,
+            ...spellingState,
+          };
+        }
+
+        // 英文拼连续两次「彻底陌生」：退回英文读阶段，读熟练度回滚到 3，
+        // 并重置拼写进度，之后需重新达到读熟悉阈值才会再次进入英文拼。
+        return {
+          ...word,
+          ...spellingState,
+          repetitions: READ_FAMILIAR_THRESHOLD - 1,
+          interval: 1,
+          dueDate: today(),
+          needsSpelling: false,
+          ...initialSpellingReviewState(),
+        };
+      })()
     : (() => {
         const readingState = applyReview(word, grade);
         return {
