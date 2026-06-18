@@ -137,8 +137,8 @@ export default function Settings({
             value={shareEmail}
             onChange={(e) => setShareEmail(e.target.value)}
           />
-          <button onClick={handleShare} disabled={shareBusy || !shareEmail.trim()}>
-            {shareBusy ? '共享中…' : '共享数据'}
+          <button className="share-btn" onClick={handleShare} disabled={shareBusy || !shareEmail.trim()}>
+            {shareBusy ? '推送中…' : '数据推送'}
           </button>
         </div>
         <span className="hint">共享后，对方账户会合并你的孩子、句子、单词和复习记录（去重），你自己的数据不变。</span>

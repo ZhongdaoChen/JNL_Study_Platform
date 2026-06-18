@@ -266,6 +266,26 @@ button {
   flex: 1;
   min-width: 220px;
 }
+.share-btn {
+  background: linear-gradient(135deg, #5b6cff 0%, #7b61ff 100%);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 6px 18px rgba(91, 108, 255, 0.22);
+  white-space: nowrap;
+}
+.share-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(91, 108, 255, 0.28);
+}
+.share-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
 
 .word-table {
   width: 100%;
