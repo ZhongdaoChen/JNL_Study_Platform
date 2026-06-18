@@ -23,6 +23,7 @@ export const SM2_CONFIG = {
 };
 
 export const READ_FAMILIAR_THRESHOLD = 4; // repetitions 达到 4 视为「已熟悉读」
+export const SPELLING_FAMILIAR_THRESHOLD = 5; // spellingRepetitions 达到 5 视为「已熟悉拼」
 
 function clampEf(ef: number): number {
   return Math.max(SM2_CONFIG.MIN_EF, ef);

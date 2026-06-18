@@ -3,6 +3,9 @@ import { repo } from '../lib/db';
 import type { Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 import { today } from '../lib/date';
+import { READ_FAMILIAR_THRESHOLD, SPELLING_FAMILIAR_THRESHOLD } from '../lib/sm2';
+
+type WordFilter = 'all' | 'read-unfamiliar' | 'read-familiar' | 'spell-unfamiliar' | 'spell-familiar';
 
 // 概览：单词/单字记忆状态一览，支持单个删除与批量多选删除
 export default function WordList({ childId, lang, refreshKey }: {
@@ -12,6 +15,7 @@ export default function WordList({ childId, lang, refreshKey }: {
 }) {
   const [words, setWords] = useState<Word[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<WordFilter>('all');
 
   function reload() {
     repo.getWords(childId).then((ws) => {
@@ -25,6 +29,9 @@ export default function WordList({ childId, lang, refreshKey }: {
   }
 
   useEffect(reload, [childId, lang, refreshKey]);
+  useEffect(() => {
+    setFilter('all');
+  }, [lang, childId]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -37,7 +44,17 @@ export default function WordList({ childId, lang, refreshKey }: {
 
   function toggleAll() {
     setSelected((prev) =>
-      prev.size === words.length ? new Set() : new Set(words.map((w) => w.id)),
+      allChecked
+        ? (() => {
+            const next = new Set(prev);
+            for (const w of filteredWords) next.delete(w.id);
+            return next;
+          })()
+        : (() => {
+            const next = new Set(prev);
+            for (const w of filteredWords) next.add(w.id);
+            return next;
+          })(),
     );
   }
 
@@ -65,7 +82,9 @@ export default function WordList({ childId, lang, refreshKey }: {
   const unit = lang === 'zh' ? '字' : '单词';
   const t = today();
   const dueCount = words.filter((w) => w.dueDate <= t).length;
-  const allChecked = words.length > 0 && selected.size === words.length;
+  const filteredWords = words.filter((w) => matchFilter(w, filter));
+  const visibleSelected = filteredWords.filter((w) => selected.has(w.id)).length;
+  const allChecked = filteredWords.length > 0 && visibleSelected === filteredWords.length;
 
   if (words.length === 0) {
     return (
@@ -81,6 +100,36 @@ export default function WordList({ childId, lang, refreshKey }: {
       <h2>📚 {unit}总览</h2>
       <p className="hint">共 {words.length} 个{unit} · 今天到期 {dueCount} 个</p>
 
+      <div className="lang-switch">
+        <button className={filter === 'all' ? 'lang-btn active' : 'lang-btn'} onClick={() => setFilter('all')}>
+          全部
+        </button>
+        <button
+          className={filter === 'read-unfamiliar' ? 'lang-btn active' : 'lang-btn'}
+          onClick={() => setFilter('read-unfamiliar')}
+        >
+          未熟悉读
+        </button>
+        <button
+          className={filter === 'read-familiar' ? 'lang-btn active' : 'lang-btn'}
+          onClick={() => setFilter('read-familiar')}
+        >
+          已熟悉读
+        </button>
+        <button
+          className={filter === 'spell-unfamiliar' ? 'lang-btn active' : 'lang-btn'}
+          onClick={() => setFilter('spell-unfamiliar')}
+        >
+          未熟悉拼
+        </button>
+        <button
+          className={filter === 'spell-familiar' ? 'lang-btn active' : 'lang-btn'}
+          onClick={() => setFilter('spell-familiar')}
+        >
+          已熟悉拼
+        </button>
+      </div>
+
       <div className="batch-bar">
         <label className="batch-all">
           <input type="checkbox" checked={allChecked} onChange={toggleAll} />
@@ -91,45 +140,66 @@ export default function WordList({ childId, lang, refreshKey }: {
         </button>
       </div>
 
-      <table className="word-table">
-        <thead>
-          <tr>
-            <th></th>
-            <th>{unit}</th>
-            <th>下次复习</th>
-            <th>间隔(天)</th>
-            <th>连对</th>
-            <th>上次</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {words.map((w) => (
-            <tr
-              key={w.id}
-              className={selected.has(w.id) ? 'row-selected' : w.dueDate <= t ? 'row-due' : ''}
-            >
-              <td>
-                <input
-                  type="checkbox"
-                  checked={selected.has(w.id)}
-                  onChange={() => toggle(w.id)}
-                />
-              </td>
-              <td>{w.text}</td>
-              <td>{w.dueDate}</td>
-              <td>{w.interval}</td>
-              <td>{w.repetitions}</td>
-              <td>{w.lastGrade ? GRADE_LABELS[w.lastGrade] : '—'}</td>
-              <td>
-                <button className="del-btn" onClick={() => deleteOne(w)} title="删除单词">
-                  🗑️
-                </button>
-              </td>
+      {filteredWords.length === 0 ? (
+        <p className="hint">当前筛选下没有符合条件的{unit}。</p>
+      ) : (
+        <table className="word-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>{unit}</th>
+              <th>下次复习</th>
+              <th>间隔(天)</th>
+              <th>读熟练度</th>
+              <th>拼写熟练度</th>
+              <th>上次</th>
+              <th></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {filteredWords.map((w) => (
+              <tr
+                key={w.id}
+                className={selected.has(w.id) ? 'row-selected' : w.dueDate <= t ? 'row-due' : ''}
+              >
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(w.id)}
+                    onChange={() => toggle(w.id)}
+                  />
+                </td>
+                <td>{w.text}</td>
+                <td>{w.dueDate}</td>
+                <td>{w.interval}</td>
+                <td>{w.repetitions}</td>
+                <td>{w.spellingRepetitions}</td>
+                <td>{w.lastGrade ? GRADE_LABELS[w.lastGrade] : '—'}</td>
+                <td>
+                  <button className="del-btn" onClick={() => deleteOne(w)} title="删除单词">
+                    🗑️
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
+}
+
+function matchFilter(w: Word, filter: WordFilter): boolean {
+  switch (filter) {
+    case 'read-unfamiliar':
+      return w.repetitions < READ_FAMILIAR_THRESHOLD;
+    case 'read-familiar':
+      return w.repetitions >= READ_FAMILIAR_THRESHOLD;
+    case 'spell-unfamiliar':
+      return w.spellingRepetitions < SPELLING_FAMILIAR_THRESHOLD;
+    case 'spell-familiar':
+      return w.spellingRepetitions >= SPELLING_FAMILIAR_THRESHOLD;
+    default:
+      return true;
+  }
 }

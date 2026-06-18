@@ -7,6 +7,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v1.6.0',
+    date: '2026-06-18',
+    items: [
+      '总览页新增筛选：未熟悉读、已熟悉读、未熟悉拼、已熟悉拼。',
+      '总览页把「连对」拆成读熟练度与拼写熟练度两列。',
+      '拼写/会写熟练度达到 5 视为「已熟悉拼」。',
+    ],
+  },
+  {
     version: 'v1.5.0',
     date: '2026-06-18',
     items: [
