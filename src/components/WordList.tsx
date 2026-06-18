@@ -62,14 +62,7 @@ export default function WordList({ childId, lang, refreshKey }: {
     });
   }
 
-  async function toggleSpelling(w: Word) {
-    const updated = { ...w, needsSpelling: !w.needsSpelling };
-    setWords((prev) => prev.map((x) => (x.id === w.id ? updated : x)));
-    await repo.upsertWord(updated);
-  }
-
   const unit = lang === 'zh' ? '字' : '单词';
-  const spellLabel = lang === 'zh' ? '需会写' : '需拼写';
   const t = today();
   const dueCount = words.filter((w) => w.dueDate <= t).length;
   const allChecked = words.length > 0 && selected.size === words.length;
@@ -103,7 +96,6 @@ export default function WordList({ childId, lang, refreshKey }: {
           <tr>
             <th></th>
             <th>{unit}</th>
-            <th>{spellLabel}</th>
             <th>下次复习</th>
             <th>间隔(天)</th>
             <th>连对</th>
@@ -125,14 +117,6 @@ export default function WordList({ childId, lang, refreshKey }: {
                 />
               </td>
               <td>{w.text}</td>
-              <td>
-                <input
-                  type="checkbox"
-                  checked={w.needsSpelling}
-                  onChange={() => toggleSpelling(w)}
-                  title={spellLabel}
-                />
-              </td>
               <td>{w.dueDate}</td>
               <td>{w.interval}</td>
               <td>{w.repetitions}</td>

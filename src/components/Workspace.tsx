@@ -14,7 +14,7 @@ import AdminPanel from './AdminPanel';
 
 type Tab = 'learn' | 'review' | 'words' | 'stats' | 'settings' | 'admin';
 
-// 复习模式：英文/中文 × 读/拼写。"拼写/会写"模式只复习勾选过需要拼写的词。
+// 复习模式：英文/中文 × 读/拼写。"拼写/会写"模式只复习已达到读熟悉阈值的词。
 type ReviewMode = 'en-read' | 'en-spell' | 'zh-read' | 'zh-write';
 const REVIEW_MODES: { key: ReviewMode; label: string; lang: Lang; spellingOnly: boolean }[] = [
   { key: 'en-read', label: '英文读', lang: 'en', spellingOnly: false },

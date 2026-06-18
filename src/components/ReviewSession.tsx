@@ -21,8 +21,6 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   const [genError, setGenError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
-  // 当前词"需要拼写/会写"的勾选意向；阅读模式下新勾选时，仅评分为"熟练"才真正加入拼写/会写。
-  const [wantSpelling, setWantSpelling] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   // 倒计时剩余毫秒（仅显示用）。0 或 countdownSec<=0 时不启用倒计时。
   const [remainMs, setRemainMs] = useState(0);
@@ -51,11 +49,6 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   }, [childId, lang, spellingOnly, dailyLimit]);
 
   const current = queue[idx];
-
-  // 切换当前词时，把勾选意向重置为该词已有的 needsSpelling 状态
-  useEffect(() => {
-    setWantSpelling(current?.needsSpelling ?? false);
-  }, [current?.id]);
 
   // 始终持有最新的 grade，供倒计时回调调用（避免把 grade 放进定时器依赖导致重置）
   const gradeRef = useRef<(g: Grade) => void>(() => {});
@@ -91,22 +84,18 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   // 乐观更新：先切到下一张卡，保存放后台执行，失败再提示
   function grade(g: Grade) {
     if (!current) return;
-    const nextNeedsSpelling = spellingOnly
-      ? current.needsSpelling
-      : current.needsSpelling || (wantSpelling && g === 'mastered');
-    const target: Word = { ...current, needsSpelling: nextNeedsSpelling };
     setDoneCount((c) => c + 1);
     setShowExample(false);
     setGenError(null);
     setSaveError(null);
     setIdx((i) => i + 1);
-    submitReview(repo, target, g, spellingOnly)
+    submitReview(repo, current, g, spellingOnly)
       .then((updated) => {
         setQueue((q) => q.map((w) => (w.id === updated.id ? updated : w)));
         onChanged();
       })
       .catch((e: any) => {
-        setSaveError(`「${target.text}」保存失败：${e?.message || '请检查网络'}`);
+        setSaveError(`「${current.text}」保存失败：${e?.message || '请检查网络'}`);
       });
   }
   gradeRef.current = grade;
@@ -153,11 +142,6 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     onChanged();
   }
 
-  // 切换当前词的"需要拼写/会写"勾选意向（阅读模式下仅本地，评分时决定是否真正加入）
-  function toggleSpelling() {
-    setWantSpelling((v) => !v);
-  }
-
   function togglePause() {
     if (countdownSec <= 0) return;
     setIsPaused((v) => !v);
@@ -174,7 +158,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         <h2>🔁 今日{modeLabel}</h2>
         <p className="hint">
           {spellingOnly
-            ? `今天没有需要${modeLabel}的${unit}，太棒了！可在${lang === 'zh' ? '中文读' : '英文读'}里勾选「${lang === 'zh' ? '需要会写' : '需要拼写'}」。`
+            ? `今天没有需要${modeLabel}的${unit}，太棒了！读熟悉度达到 4 后会自动进入这里。`
             : `今天没有需要复习的${unit}，太棒了！去录入新内容吧。`}
         </p>
       </div>
@@ -281,19 +265,6 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
           </div>
         );
       })()}
-
-      {!spellingOnly && (
-        <label className="check-label">
-          <input
-            type="checkbox"
-            checked={wantSpelling}
-            onChange={toggleSpelling}
-          />
-          {lang === 'zh'
-            ? '需要会写（评分「熟练」后加入「中文写」）'
-            : '需要拼写（评分「熟练」后加入「英文拼」）'}
-        </label>
-      )}
 
       <div className="grade-buttons">
         <button className="g-mastered" onClick={() => grade('mastered')}>
