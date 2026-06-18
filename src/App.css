@@ -262,6 +262,10 @@ button {
   width: 5ch;
   min-width: 5ch;
 }
+.share-email-input {
+  flex: 1;
+  min-width: 220px;
+}
 
 .word-table {
   width: 100%;

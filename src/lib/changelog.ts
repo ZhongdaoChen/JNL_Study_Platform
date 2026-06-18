@@ -7,6 +7,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v1.7.0',
+    date: '2026-06-18',
+    items: [
+      '配置页新增「数据共享账户」，可把当前账户的学习数据共享给另一个已注册邮箱。',
+      '共享后对方账户会合并孩子、句子、单词和复习记录，并自动去重；自己数据不变。',
+    ],
+  },
+  {
     version: 'v1.6.0',
     date: '2026-06-18',
     items: [

@@ -233,7 +233,206 @@ begin
 end;
 $$;
 
+-- 把当前用户的学习数据共享（复制并并集去重）到另一个已注册邮箱账号
+create or replace function share_data_to_email(target_email text)
+returns table(
+  created_children int,
+  inserted_sentences int,
+  upserted_words int,
+  inserted_logs int
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  src_uid uuid := auth.uid();
+  dest_uid uuid;
+  src_child record;
+  src_sentence record;
+  src_word record;
+  src_log record;
+  target_child_id uuid;
+  target_word_id uuid;
+  existing_word record;
+  mapped_sentence_ids uuid[];
+  latest_last_reviewed_at timestamptz;
+  latest_last_grade text;
+  latest_spelling_last_reviewed_at timestamptz;
+  latest_spelling_last_grade text;
+begin
+  if src_uid is null then
+    raise exception '请先登录';
+  end if;
+
+  select u.id
+  into dest_uid
+  from auth.users u
+  where lower(u.email::text) = lower(trim(target_email))
+  limit 1;
+
+  if dest_uid is null then
+    raise exception '该邮箱不是已注册用户';
+  end if;
+
+  if dest_uid = src_uid then
+    raise exception '不能共享给自己';
+  end if;
+
+  created_children := 0;
+  inserted_sentences := 0;
+  upserted_words := 0;
+  inserted_logs := 0;
+
+  for src_child in
+    select * from children where owner = src_uid order by created_at
+  loop
+    select c.id
+    into target_child_id
+    from children c
+    where c.owner = dest_uid and c.name = src_child.name
+    order by c.created_at
+    limit 1;
+
+    if not found then
+      insert into children(owner, name)
+      values (dest_uid, src_child.name)
+      returning id into target_child_id;
+      created_children := created_children + 1;
+    end if;
+
+    for src_sentence in
+      select * from sentences where child_id = src_child.id order by created_at
+    loop
+      if not exists (
+        select 1 from sentences s
+        where s.child_id = target_child_id and s.text = src_sentence.text
+      ) then
+        insert into sentences(child_id, text, created_at)
+        values (target_child_id, src_sentence.text, src_sentence.created_at);
+        inserted_sentences := inserted_sentences + 1;
+      end if;
+    end loop;
+
+    for src_word in
+      select * from words where child_id = src_child.id order by first_learned_at
+    loop
+      mapped_sentence_ids := coalesce((
+        select array_agg(distinct target_sentence.id)
+        from unnest(coalesce(src_word.sentence_ids, '{}'::uuid[])) as sid
+        join sentences source_sentence on source_sentence.id = sid
+        join lateral (
+          select s2.id
+          from sentences s2
+          where s2.child_id = target_child_id and s2.text = source_sentence.text
+          order by s2.created_at
+          limit 1
+        ) as target_sentence on true
+      ), '{}'::uuid[]);
+
+      select *
+      into existing_word
+      from words w
+      where w.child_id = target_child_id and w.text = src_word.text
+      limit 1;
+
+      if not found then
+        insert into words(
+          child_id, text, lang, sentence_ids, first_learned_at, example_sentence, needs_spelling,
+          interval, ef, repetitions, due_date, last_grade, last_reviewed_at,
+          spelling_interval, spelling_ef, spelling_repetitions, spelling_due_date,
+          spelling_last_grade, spelling_last_reviewed_at
+        )
+        values (
+          target_child_id, src_word.text, src_word.lang, mapped_sentence_ids, src_word.first_learned_at,
+          src_word.example_sentence, src_word.needs_spelling,
+          src_word.interval, src_word.ef, src_word.repetitions, src_word.due_date,
+          src_word.last_grade, src_word.last_reviewed_at,
+          src_word.spelling_interval, src_word.spelling_ef, src_word.spelling_repetitions,
+          src_word.spelling_due_date, src_word.spelling_last_grade, src_word.spelling_last_reviewed_at
+        )
+        returning id into target_word_id;
+      else
+        latest_last_reviewed_at :=
+          case
+            when existing_word.last_reviewed_at is null then src_word.last_reviewed_at
+            when src_word.last_reviewed_at is null then existing_word.last_reviewed_at
+            when existing_word.last_reviewed_at >= src_word.last_reviewed_at then existing_word.last_reviewed_at
+            else src_word.last_reviewed_at
+          end;
+        latest_last_grade :=
+          case
+            when latest_last_reviewed_at is not distinct from existing_word.last_reviewed_at then existing_word.last_grade
+            else src_word.last_grade
+          end;
+
+        latest_spelling_last_reviewed_at :=
+          case
+            when existing_word.spelling_last_reviewed_at is null then src_word.spelling_last_reviewed_at
+            when src_word.spelling_last_reviewed_at is null then existing_word.spelling_last_reviewed_at
+            when existing_word.spelling_last_reviewed_at >= src_word.spelling_last_reviewed_at then existing_word.spelling_last_reviewed_at
+            else src_word.spelling_last_reviewed_at
+          end;
+        latest_spelling_last_grade :=
+          case
+            when latest_spelling_last_reviewed_at is not distinct from existing_word.spelling_last_reviewed_at then existing_word.spelling_last_grade
+            else src_word.spelling_last_grade
+          end;
+
+        update words
+        set
+          sentence_ids = (
+            select array_agg(distinct sid)
+            from unnest(coalesce(existing_word.sentence_ids, '{}'::uuid[]) || mapped_sentence_ids) as sid
+          ),
+          first_learned_at = least(existing_word.first_learned_at, src_word.first_learned_at),
+          example_sentence = coalesce(existing_word.example_sentence, src_word.example_sentence),
+          needs_spelling = existing_word.needs_spelling or src_word.needs_spelling,
+          interval = greatest(existing_word.interval, src_word.interval),
+          ef = greatest(existing_word.ef, src_word.ef),
+          repetitions = greatest(existing_word.repetitions, src_word.repetitions),
+          due_date = least(existing_word.due_date, src_word.due_date),
+          last_grade = latest_last_grade,
+          last_reviewed_at = latest_last_reviewed_at,
+          spelling_interval = greatest(existing_word.spelling_interval, src_word.spelling_interval),
+          spelling_ef = greatest(existing_word.spelling_ef, src_word.spelling_ef),
+          spelling_repetitions = greatest(existing_word.spelling_repetitions, src_word.spelling_repetitions),
+          spelling_due_date = least(existing_word.spelling_due_date, src_word.spelling_due_date),
+          spelling_last_grade = latest_spelling_last_grade,
+          spelling_last_reviewed_at = latest_spelling_last_reviewed_at
+        where id = existing_word.id;
+
+        target_word_id := existing_word.id;
+      end if;
+
+      upserted_words := upserted_words + 1;
+
+      for src_log in
+        select * from review_logs
+        where child_id = src_child.id and word_id = src_word.id
+        order by reviewed_at
+      loop
+        if not exists (
+          select 1 from review_logs rl
+          where rl.child_id = target_child_id
+            and rl.word_id = target_word_id
+            and rl.grade = src_log.grade
+            and rl.reviewed_at = src_log.reviewed_at
+        ) then
+          insert into review_logs(child_id, word_id, grade, reviewed_at)
+          values (target_child_id, target_word_id, src_log.grade, src_log.reviewed_at);
+          inserted_logs := inserted_logs + 1;
+        end if;
+      end loop;
+    end loop;
+  end loop;
+
+  return next;
+end;
+$$;
+
 grant execute on function is_admin() to authenticated;
 grant execute on function admin_user_stats() to authenticated;
 grant execute on function admin_words() to authenticated;
 grant execute on function admin_feedback() to authenticated;
+grant execute on function share_data_to_email(text) to authenticated;

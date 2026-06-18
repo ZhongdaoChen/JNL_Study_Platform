@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { shareDataToEmail } from '../lib/dataShare';
 
 export default function Settings({
   countdownSec,
@@ -24,6 +25,9 @@ export default function Settings({
     'zh-read': dailyLimits['zh-read'] > 0 ? String(dailyLimits['zh-read']) : '',
     'zh-write': dailyLimits['zh-write'] > 0 ? String(dailyLimits['zh-write']) : '',
   });
+  const [shareEmail, setShareEmail] = useState('');
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareMsg, setShareMsg] = useState<string | null>(null);
 
   function handleCountdownChange(v: string) {
     if (!/^\d*$/.test(v)) return;
@@ -35,6 +39,25 @@ export default function Settings({
     if (!/^\d*$/.test(v)) return;
     setLimitText((prev) => ({ ...prev, [mode]: v }));
     onDailyLimitChange(mode, v === '' ? 0 : Number(v));
+  }
+
+  async function handleShare() {
+    const email = shareEmail.trim();
+    if (!email) return;
+    if (!confirm(`确认将当前账户的学习数据共享给 ${email} 吗？对方会取并集去重，你自己的数据不变。`)) return;
+    setShareBusy(true);
+    setShareMsg(null);
+    try {
+      const result = await shareDataToEmail(email);
+      setShareMsg(
+        `共享完成：新建孩子 ${result.created_children} 个，新增句子 ${result.inserted_sentences} 条，合并单词 ${result.upserted_words} 个，新增复习记录 ${result.inserted_logs} 条。`,
+      );
+      setShareEmail('');
+    } catch (e: any) {
+      setShareMsg(`共享失败：${e?.message || '请稍后重试'}`);
+    } finally {
+      setShareBusy(false);
+    }
   }
 
   return (
@@ -102,6 +125,24 @@ export default function Settings({
           value={limitText['zh-write']}
           onChange={(e) => handleLimitChange('zh-write', e.target.value)}
         />
+      </div>
+
+      <div className="countdown-config">
+        <label className="field-label">数据共享账户</label>
+        <div className="config-inline">
+          <input
+            className="share-email-input"
+            type="email"
+            placeholder="输入对方已注册邮箱"
+            value={shareEmail}
+            onChange={(e) => setShareEmail(e.target.value)}
+          />
+          <button onClick={handleShare} disabled={shareBusy || !shareEmail.trim()}>
+            {shareBusy ? '共享中…' : '共享数据'}
+          </button>
+        </div>
+        <span className="hint">共享后，对方账户会合并你的孩子、句子、单词和复习记录（去重），你自己的数据不变。</span>
+        {shareMsg && <p className="hint">{shareMsg}</p>}
       </div>
     </div>
   );
