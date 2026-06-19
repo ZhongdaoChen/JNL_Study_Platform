@@ -254,7 +254,6 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
               onSaveConfig={handleSaveSettings}
               saveBusy={settingsSaveBusy}
               saveMsg={settingsSaveMsg}
-              cloudEnabled={usingCloud}
             />
           )}
           {tab === 'admin' && isAdmin && <AdminPanel />}

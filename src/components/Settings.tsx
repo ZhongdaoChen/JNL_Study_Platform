@@ -9,7 +9,6 @@ export default function Settings({
   onSaveConfig,
   saveBusy,
   saveMsg,
-  cloudEnabled,
 }: {
   countdownSec: number;
   onCountdownChange: (sec: number) => void;
@@ -23,7 +22,6 @@ export default function Settings({
   onSaveConfig: () => Promise<void>;
   saveBusy: boolean;
   saveMsg: string | null;
-  cloudEnabled: boolean;
 }) {
   // 用本地字符串管理输入，允许清空；空值视为关闭/不限（0）。
   const [countdownText, setCountdownText] = useState(countdownSec > 0 ? String(countdownSec) : '');
@@ -146,16 +144,6 @@ export default function Settings({
       </div>
 
       <div className="countdown-config">
-        <button className="settings-save-btn" onClick={() => void onSaveConfig()} disabled={saveBusy}>
-          {saveBusy ? '提交配置中…' : '提交配置'}
-        </button>
-        <span className="hint">
-          {cloudEnabled ? '提交后会落库，并在该用户的其他设备登录时自动生效。' : '当前是本地模式，提交配置不会同步到其他设备。'}
-        </span>
-        {saveMsg && <p className="hint">{saveMsg}</p>}
-      </div>
-
-      <div className="countdown-config">
         <label className="field-label">数据共享账户</label>
         <div className="config-inline">
           <input
@@ -171,6 +159,13 @@ export default function Settings({
         </div>
         <span className="hint">共享后，对方账户会合并你的孩子、句子、单词和复习记录（去重），你自己的数据不变。</span>
         {shareMsg && <p className="hint">{shareMsg}</p>}
+      </div>
+
+      <div className="countdown-config">
+        <button className="settings-save-btn" onClick={() => void onSaveConfig()} disabled={saveBusy}>
+          {saveBusy ? '提交配置中…' : '提交配置'}
+        </button>
+        {saveMsg && <p className="hint">{saveMsg}</p>}
       </div>
     </div>
   );
