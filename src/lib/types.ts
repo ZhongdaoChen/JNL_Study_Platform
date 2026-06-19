@@ -66,6 +66,7 @@ export interface Word {
   spellingLastGrade: Grade | null;
   spellingLastReviewedAt: string | null;
   spellingPendingRetryCount: number; // 拼写/会写当天还需追加到队尾补做几次
+  volatilityRate: number; // 最近几次复习的熟练度波动率（0-100）
 }
 
 // 每次复习的日志（用于以后看进步曲线）

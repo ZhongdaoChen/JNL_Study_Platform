@@ -79,6 +79,7 @@ export class LocalRepo implements Repo {
         needsSpelling: w.needsSpelling ?? false,
         pendingRetryCount: w.pendingRetryCount ?? 0,
         spellingPendingRetryCount: w.spellingPendingRetryCount ?? 0,
+        volatilityRate: w.volatilityRate ?? 0,
         ...(w.spellingDueDate ? {} : initialSpellingReviewState()),
       }));
   }

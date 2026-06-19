@@ -42,6 +42,7 @@ function rowToWord(r: any): Word {
     lastGrade: r.last_grade,
     lastReviewedAt: r.last_reviewed_at,
     pendingRetryCount: r.pending_retry_count ?? 0,
+    volatilityRate: r.volatility_rate ?? 0,
     ...spelling,
   };
 }
@@ -121,6 +122,7 @@ export class SupabaseRepo implements Repo {
       last_grade: word.lastGrade,
       last_reviewed_at: word.lastReviewedAt,
       pending_retry_count: word.pendingRetryCount,
+      volatility_rate: word.volatilityRate,
       spelling_interval: word.spellingInterval,
       spelling_ef: word.spellingEf,
       spelling_repetitions: word.spellingRepetitions,

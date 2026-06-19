@@ -19,11 +19,10 @@ export default function WordList({ childId, lang, refreshKey }: {
 
   function reload() {
     repo.getWords(childId).then((ws) => {
-      setWords(
-        ws
-          .filter((w) => w.lang === lang)
-          .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1)),
-      );
+      const nextWords = ws
+        .filter((w) => w.lang === lang)
+        .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1));
+      setWords(nextWords);
       setSelected(new Set());
     });
   }
@@ -98,7 +97,7 @@ export default function WordList({ childId, lang, refreshKey }: {
   return (
     <div className="card">
       <h2>📚 {unit}总览</h2>
-      <p className="hint">共 {words.length} 个{unit} · 今天到期 {dueCount} 个</p>
+      <p className="hint">共 {words.length} 个{unit} · 今天到期 {dueCount} 个 · 波动率越高说明最近越反复</p>
 
       <div className="lang-switch">
         <button className={filter === 'all' ? 'lang-btn active' : 'lang-btn'} onClick={() => setFilter('all')}>
@@ -152,6 +151,7 @@ export default function WordList({ childId, lang, refreshKey }: {
               <th>间隔(天)</th>
               <th>读熟练度</th>
               <th>拼写熟练度</th>
+              <th>熟练度波动率</th>
               <th>上次</th>
               <th></th>
             </tr>
@@ -174,6 +174,7 @@ export default function WordList({ childId, lang, refreshKey }: {
                 <td>{w.interval}</td>
                 <td>{formatReadProficiency(w.repetitions)}</td>
                 <td>{formatSpellingProficiency(w.spellingRepetitions)}</td>
+                <td>{formatVolatilityRate(w.volatilityRate)}</td>
                 <td>{w.lastGrade ? GRADE_LABELS[w.lastGrade] : '—'}</td>
                 <td>
                   <button className="del-btn" onClick={() => deleteOne(w)} title="删除单词">
@@ -214,4 +215,8 @@ function formatReadProficiency(repetitions: number): string {
 function formatSpellingProficiency(repetitions: number): string {
   const pct = Math.min(100, Math.max(0, repetitions) * 20);
   return `${pct}%`;
+}
+
+function formatVolatilityRate(rate: number): string {
+  return `${Math.max(0, Math.min(100, Math.round(rate)))}%`;
 }

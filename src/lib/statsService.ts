@@ -20,6 +20,8 @@ export interface Stats {
   gradeBreakdown: { instant: number; mastered: number; fuzzy: number; forgotten: number }; // 各档累计次数
 }
 
+const VOLATILITY_WINDOW = 8;
+
 export function computeStats(words: Word[], logs: ReviewLog[]): Stats {
   const t = today();
   const tomorrow = addDays(t, 1);
@@ -76,9 +78,49 @@ export function computeStats(words: Word[], logs: ReviewLog[]): Stats {
   };
 }
 
+export function computeVolatilityRate(logs: ReviewLog[], sampleSize = VOLATILITY_WINDOW): number {
+  if (logs.length < 2) return 0;
+  const recent = [...logs]
+    .sort((a, b) => a.reviewedAt.localeCompare(b.reviewedAt))
+    .slice(-sampleSize);
+  if (recent.length < 2) return 0;
+
+  const levels = recent.map((log) => gradeLevel(log.grade));
+  let deltaSum = 0;
+  let bandSwitches = 0;
+
+  for (let i = 1; i < levels.length; i++) {
+    const prev = levels[i - 1];
+    const curr = levels[i];
+    deltaSum += Math.abs(curr - prev);
+    if (volatilityBand(prev) !== volatilityBand(curr)) bandSwitches += 1;
+  }
+
+  const deltaRate = deltaSum / ((levels.length - 1) * 3);
+  const switchRate = bandSwitches / (levels.length - 1);
+  return Math.round((deltaRate * 0.65 + switchRate * 0.35) * 100);
+}
+
 // 轻量日期加减（不依赖外部，避免循环依赖）
 function addDaysLocal(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + days);
   return toDateStr(d);
+}
+
+function gradeLevel(grade: ReviewLog['grade']): number {
+  switch (grade) {
+    case 'instant':
+      return 3;
+    case 'mastered':
+      return 2;
+    case 'fuzzy':
+      return 1;
+    case 'forgotten':
+      return 0;
+  }
+}
+
+function volatilityBand(level: number): 'high' | 'low' {
+  return level >= 2 ? 'high' : 'low';
 }

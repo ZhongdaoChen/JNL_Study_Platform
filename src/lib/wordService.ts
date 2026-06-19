@@ -1,6 +1,7 @@
 import type { Grade, Lang, Sentence, Word } from './types';
 import type { Repo } from './repo';
 import { tokenizeByLang } from './tokenizer';
+import { computeVolatilityRate } from './statsService';
 import {
   applyReview,
   initialReviewState,
@@ -49,6 +50,7 @@ export async function addLearning(
         firstLearnedAt: learnedOn,
         needsSpelling: false,
         exampleSentence: null,
+        volatilityRate: 0,
         ...initialReviewState(learnedOn),
         ...initialSpellingReviewState(),
       };
@@ -98,6 +100,7 @@ export async function submitReview(
 ): Promise<Word> {
   const todayStr = today();
   const tomorrow = addDays(today(), 1);
+  const reviewedAt = new Date().toISOString();
   const updated: Word = spellingOnly
     ? (() => {
         const rawSpellingState = mapSpellingState(applyReview(
@@ -184,16 +187,21 @@ export async function submitReview(
           needsSpelling: readingState.repetitions >= READ_FAMILIAR_THRESHOLD,
         };
       })();
+  const nextLog = {
+    id: crypto.randomUUID(),
+    wordId: word.id,
+    childId: word.childId,
+    grade,
+    reviewedAt,
+  };
+  const logs = await repo.getReviewLogs(word.childId);
+  updated.volatilityRate = computeVolatilityRate(
+    logs.filter((log) => log.wordId === word.id).concat(nextLog),
+  );
   // 两次写互不依赖，并行执行，减少一次网络往返的等待
   await Promise.all([
     repo.upsertWord(updated),
-    repo.addReviewLog({
-      id: crypto.randomUUID(),
-      wordId: word.id,
-      childId: word.childId,
-      grade,
-      reviewedAt: new Date().toISOString(),
-    }),
+    repo.addReviewLog(nextLog),
   ]);
   return updated;
 }
