@@ -11,7 +11,8 @@ export interface Stats {
   totalWords: number;
   masteredWords: number; // 已熟悉读（repetitions >= 阈值）
   learningWords: number; // 学习中
-  dueToday: number; // 今日待复习
+  dueTodayEn: number; // 今日待复习英文
+  dueTodayZh: number; // 今日待复习中文
   dueTomorrow: number; // 预测明日待复习
   reviewsTotal: number; // 累计复习次数
   streak: number; // 连续学习天数（截至今天/昨天）
@@ -24,7 +25,8 @@ export function computeStats(words: Word[], logs: ReviewLog[]): Stats {
   const tomorrow = addDays(t, 1);
 
   const masteredWords = words.filter((w) => w.repetitions >= READ_FAMILIAR_THRESHOLD).length;
-  const dueToday = words.filter((w) => w.dueDate <= t).length;
+  const dueTodayEn = words.filter((w) => w.lang === 'en' && w.dueDate <= t).length;
+  const dueTodayZh = words.filter((w) => w.lang === 'zh' && w.dueDate <= t).length;
   const dueTomorrow = words.filter((w) => w.dueDate <= tomorrow).length;
 
   // 各档累计次数
@@ -64,7 +66,8 @@ export function computeStats(words: Word[], logs: ReviewLog[]): Stats {
     totalWords: words.length,
     masteredWords,
     learningWords: words.length - masteredWords,
-    dueToday,
+    dueTodayEn,
+    dueTodayZh,
     dueTomorrow,
     reviewsTotal: logs.length,
     streak,

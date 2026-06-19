@@ -44,8 +44,12 @@ export default function StatsBoard({ childId, refreshKey }: { childId: string; r
           <div className="stat-label">已熟悉读</div>
         </div>
         <div className="stat-box">
-          <div className="stat-num">{stats.dueToday}</div>
-          <div className="stat-label">今日待复习</div>
+          <div className="stat-num">{stats.dueTodayEn}</div>
+          <div className="stat-label">今日待复习英文</div>
+        </div>
+        <div className="stat-box">
+          <div className="stat-num">{stats.dueTodayZh}</div>
+          <div className="stat-label">今日待复习中文</div>
         </div>
         <div className="stat-box">
           <div className="stat-num">{stats.dueTomorrow}</div>
