@@ -4,6 +4,7 @@ import { addLearning } from '../lib/wordService';
 import { today } from '../lib/date';
 import type { Lang } from '../lib/types';
 import { LANG_LABELS } from '../lib/types';
+import { tokenizeByLang } from '../lib/tokenizer';
 
 // 模块1：录入今日学习的新内容（英文按词拆分 / 中文按字拆分）
 export default function LearnInput({ childId, onChanged }: { childId: string; onChanged: () => void }) {
@@ -11,20 +12,40 @@ export default function LearnInput({ childId, onChanged }: { childId: string; on
   const [text, setText] = useState('');
   const [learnedOn, setLearnedOn] = useState(today());
   const [busy, setBusy] = useState(false);
+  const [previewWords, setPreviewWords] = useState<string[] | null>(null);
   const [result, setResult] = useState<{ newWords: string[]; reviewedExisting: string[] } | null>(null);
 
-  async function handleSubmit() {
+  function resetDraft(clearText = false) {
+    setPreviewWords(null);
+    setResult(null);
+    if (clearText) setText('');
+  }
+
+  function handlePreview() {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setResult(null);
+    setPreviewWords(tokenizeByLang(trimmed, lang));
+  }
+
+  async function handleConfirm() {
+    if (!previewWords || previewWords.length === 0) return;
     const trimmed = text.trim();
     if (!trimmed) return;
     setBusy(true);
     try {
-      const r = await addLearning(repo, childId, trimmed, lang, learnedOn);
+      const r = await addLearning(repo, childId, trimmed, lang, learnedOn, previewWords);
       setResult({ newWords: r.newWords, reviewedExisting: r.reviewedExisting });
+      setPreviewWords(null);
       setText('');
       onChanged();
     } finally {
       setBusy(false);
     }
+  }
+
+  function removePreviewWord(word: string) {
+    setPreviewWords((prev) => prev?.filter((item) => item !== word) ?? null);
   }
 
   const unit = lang === 'zh' ? '字' : '单词';
@@ -40,7 +61,7 @@ export default function LearnInput({ childId, onChanged }: { childId: string; on
             className={lang === l ? 'lang-btn active' : 'lang-btn'}
             onClick={() => {
               setLang(l);
-              setResult(null);
+              resetDraft();
             }}
           >
             {LANG_LABELS[l]}
@@ -60,21 +81,59 @@ export default function LearnInput({ childId, onChanged }: { childId: string; on
         type="date"
         value={learnedOn}
         max={today()}
-        onChange={(e) => setLearnedOn(e.target.value)}
+        onChange={(e) => {
+          setLearnedOn(e.target.value);
+          setResult(null);
+        }}
       />
 
       <textarea
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          setPreviewWords(null);
+          setResult(null);
+        }}
         placeholder={
           lang === 'zh' ? '例如：小猫在床上睡觉。' : '例如：The cat is sleeping on the bed.'
         }
         rows={3}
       />
 
-      <button onClick={handleSubmit} disabled={busy || !text.trim()}>
-        {busy ? '处理中…' : `拆${unit}并保存`}
-      </button>
+      {!previewWords ? (
+        <button onClick={handlePreview} disabled={busy || !text.trim()}>
+          {`先拆${unit}`}
+        </button>
+      ) : (
+        <div className="learn-preview-area">
+          <p className="hint">先确认要保留哪些{unit}，点右上角 × 可以删除。</p>
+          <div className="learn-preview-grid">
+            {previewWords.map((word) => (
+              <div key={word} className="learn-preview-card">
+                <button
+                  type="button"
+                  className="learn-preview-remove"
+                  onClick={() => removePreviewWord(word)}
+                  title={`删除${unit} ${word}`}
+                >
+                  ×
+                </button>
+                <span>{word}</span>
+              </div>
+            ))}
+          </div>
+          <div className="learn-preview-actions">
+            <button type="button" className="secondary-btn" onClick={() => setPreviewWords(null)} disabled={busy}>
+              返回修改
+            </button>
+            <button onClick={handleConfirm} disabled={busy || previewWords.length === 0}>
+              {busy ? '正在写入数据库…' : `确认写入 ${previewWords.length} 个${unit}`}
+            </button>
+          </div>
+          {busy && <p className="hint">正在写入数据库，请稍等…</p>}
+          {previewWords.length === 0 && <p className="hint">已全部删除，请返回修改重新拆词。</p>}
+        </div>
+      )}
 
       {result && (
         <div className="result">

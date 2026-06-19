@@ -21,9 +21,10 @@ export async function addLearning(
   text: string,
   lang: Lang = 'en',
   learnedOn: string = today(),
+  selectedTokens?: string[],
 ): Promise<{ sentence: Sentence; newWords: string[]; reviewedExisting: string[] }> {
   const sentence = await repo.addSentence(childId, text.trim());
-  const tokens = tokenizeByLang(text, lang);
+  const tokens = selectedTokens ?? tokenizeByLang(text, lang);
   const existing = (await repo.getWords(childId)).filter((w) => w.lang === lang);
   const byText = new Map(existing.map((w) => [w.text, w]));
 
