@@ -23,6 +23,7 @@ function rowToWord(r: any): Word {
         spellingDueDate: r.spelling_due_date,
         spellingLastGrade: r.spelling_last_grade,
         spellingLastReviewedAt: r.spelling_last_reviewed_at,
+        spellingPendingRetryCount: r.spelling_pending_retry_count ?? 0,
       }
     : initialSpellingReviewState();
   return {
@@ -40,6 +41,7 @@ function rowToWord(r: any): Word {
     dueDate: r.due_date,
     lastGrade: r.last_grade,
     lastReviewedAt: r.last_reviewed_at,
+    pendingRetryCount: r.pending_retry_count ?? 0,
     ...spelling,
   };
 }
@@ -118,12 +120,14 @@ export class SupabaseRepo implements Repo {
       due_date: word.dueDate,
       last_grade: word.lastGrade,
       last_reviewed_at: word.lastReviewedAt,
+      pending_retry_count: word.pendingRetryCount,
       spelling_interval: word.spellingInterval,
       spelling_ef: word.spellingEf,
       spelling_repetitions: word.spellingRepetitions,
       spelling_due_date: word.spellingDueDate,
       spelling_last_grade: word.spellingLastGrade,
       spelling_last_reviewed_at: word.spellingLastReviewedAt,
+      spelling_pending_retry_count: word.spellingPendingRetryCount,
     });
     if (error) this.fail('upsertWord', error);
   }

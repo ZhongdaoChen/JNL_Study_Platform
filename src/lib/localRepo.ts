@@ -77,6 +77,8 @@ export class LocalRepo implements Repo {
         text: (w.lang ?? 'en') === 'en' ? capitalizeWord(w.text) : w.text,
         lang: w.lang ?? 'en',
         needsSpelling: w.needsSpelling ?? false,
+        pendingRetryCount: w.pendingRetryCount ?? 0,
+        spellingPendingRetryCount: w.spellingPendingRetryCount ?? 0,
         ...(w.spellingDueDate ? {} : initialSpellingReviewState()),
       }));
   }

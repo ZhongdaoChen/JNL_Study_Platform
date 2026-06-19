@@ -56,6 +56,7 @@ export interface Word {
   dueDate: string; // 下次复习日期 (YYYY-MM-DD)
   lastGrade: Grade | null;
   lastReviewedAt: string | null;
+  pendingRetryCount: number; // 当天还需追加到队尾补做几次
 
   // ---- 拼写 / 会写 的独立进度 ----
   spellingInterval: number;
@@ -64,6 +65,7 @@ export interface Word {
   spellingDueDate: string;
   spellingLastGrade: Grade | null;
   spellingLastReviewedAt: string | null;
+  spellingPendingRetryCount: number; // 拼写/会写当天还需追加到队尾补做几次
 }
 
 // 每次复习的日志（用于以后看进步曲线）

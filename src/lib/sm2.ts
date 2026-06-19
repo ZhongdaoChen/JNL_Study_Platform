@@ -37,7 +37,7 @@ function clampInterval(days: number): number {
 // 新单词刚学会时的初始记忆状态：明日首次复习
 export function initialReviewState(learnedOn: string = today()): Pick<
   Word,
-  'interval' | 'ef' | 'repetitions' | 'dueDate' | 'lastGrade' | 'lastReviewedAt'
+  'interval' | 'ef' | 'repetitions' | 'dueDate' | 'lastGrade' | 'lastReviewedAt' | 'pendingRetryCount'
 > {
   return {
     interval: 1,
@@ -46,13 +46,14 @@ export function initialReviewState(learnedOn: string = today()): Pick<
     dueDate: addDays(learnedOn, 1), // 次日复习
     lastGrade: null,
     lastReviewedAt: null,
+    pendingRetryCount: 0,
   };
 }
 
 // 拼写/会写独立进度的初始状态：当天即可进入拼写队列
 export function initialSpellingReviewState(on: string = today()): Pick<
   Word,
-  'spellingInterval' | 'spellingEf' | 'spellingRepetitions' | 'spellingDueDate' | 'spellingLastGrade' | 'spellingLastReviewedAt'
+  'spellingInterval' | 'spellingEf' | 'spellingRepetitions' | 'spellingDueDate' | 'spellingLastGrade' | 'spellingLastReviewedAt' | 'spellingPendingRetryCount'
 > {
   return {
     spellingInterval: 0,
@@ -61,6 +62,7 @@ export function initialSpellingReviewState(on: string = today()): Pick<
     spellingDueDate: on,
     spellingLastGrade: null,
     spellingLastReviewedAt: null,
+    spellingPendingRetryCount: 0,
   };
 }
 

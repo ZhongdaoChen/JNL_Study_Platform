@@ -40,12 +40,14 @@ create table if not exists words (
   due_date date not null,
   last_grade text,
   last_reviewed_at timestamptz,
+  pending_retry_count int not null default 0,
   spelling_interval int not null default 0,
   spelling_ef real not null default 2.5,
   spelling_repetitions int not null default 0,
   spelling_due_date date not null default current_date,
   spelling_last_grade text,
   spelling_last_reviewed_at timestamptz,
+  spelling_pending_retry_count int not null default 0,
   unique (child_id, text)
 );
 
@@ -59,6 +61,8 @@ alter table words add column if not exists spelling_repetitions int not null def
 alter table words add column if not exists spelling_due_date date not null default current_date;
 alter table words add column if not exists spelling_last_grade text;
 alter table words add column if not exists spelling_last_reviewed_at timestamptz;
+alter table words add column if not exists pending_retry_count int not null default 0;
+alter table words add column if not exists spelling_pending_retry_count int not null default 0;
 
 -- 复习日志
 create table if not exists review_logs (
@@ -339,17 +343,18 @@ begin
       if not found then
         insert into words(
           child_id, text, lang, sentence_ids, first_learned_at, example_sentence, needs_spelling,
-          interval, ef, repetitions, due_date, last_grade, last_reviewed_at,
+          interval, ef, repetitions, due_date, last_grade, last_reviewed_at, pending_retry_count,
           spelling_interval, spelling_ef, spelling_repetitions, spelling_due_date,
-          spelling_last_grade, spelling_last_reviewed_at
+          spelling_last_grade, spelling_last_reviewed_at, spelling_pending_retry_count
         )
         values (
           target_child_id, src_word.text, src_word.lang, mapped_sentence_ids, src_word.first_learned_at,
           src_word.example_sentence, src_word.needs_spelling,
           src_word.interval, src_word.ef, src_word.repetitions, src_word.due_date,
-          src_word.last_grade, src_word.last_reviewed_at,
+          src_word.last_grade, src_word.last_reviewed_at, src_word.pending_retry_count,
           src_word.spelling_interval, src_word.spelling_ef, src_word.spelling_repetitions,
-          src_word.spelling_due_date, src_word.spelling_last_grade, src_word.spelling_last_reviewed_at
+          src_word.spelling_due_date, src_word.spelling_last_grade, src_word.spelling_last_reviewed_at,
+          src_word.spelling_pending_retry_count
         )
         returning id into target_word_id;
       else
@@ -394,12 +399,14 @@ begin
           due_date = least(existing_word.due_date, src_word.due_date),
           last_grade = latest_last_grade,
           last_reviewed_at = latest_last_reviewed_at,
+          pending_retry_count = greatest(existing_word.pending_retry_count, src_word.pending_retry_count),
           spelling_interval = greatest(existing_word.spelling_interval, src_word.spelling_interval),
           spelling_ef = greatest(existing_word.spelling_ef, src_word.spelling_ef),
           spelling_repetitions = greatest(existing_word.spelling_repetitions, src_word.spelling_repetitions),
           spelling_due_date = least(existing_word.spelling_due_date, src_word.spelling_due_date),
           spelling_last_grade = latest_spelling_last_grade,
-          spelling_last_reviewed_at = latest_spelling_last_reviewed_at
+          spelling_last_reviewed_at = latest_spelling_last_reviewed_at,
+          spelling_pending_retry_count = greatest(existing_word.spelling_pending_retry_count, src_word.spelling_pending_retry_count)
         where id = existing_word.id;
 
         target_word_id := existing_word.id;

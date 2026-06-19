@@ -114,26 +114,30 @@ export async function submitReview(
         const consecutiveSpellingForgotten =
           word.lang === 'en' &&
           grade === 'forgotten' &&
-          word.spellingLastGrade === 'forgotten';
+          word.spellingLastGrade === 'forgotten' &&
+          word.spellingPendingRetryCount <= 0;
 
         if (grade === 'forgotten' && !suppressRepetitionGain) {
-          // 第一次彻底陌生：仍保留在今天，等待同日队尾再复习一遍
+          // 第一次彻底陌生：仍保留在今天，等待同日队尾再复习两遍
           return {
             ...word,
             ...spellingState,
             spellingInterval: 0,
             spellingDueDate: todayStr,
+            spellingPendingRetryCount: 2,
           };
         }
 
         if (!consecutiveSpellingForgotten) {
+          const remaining = suppressRepetitionGain ? Math.max(0, word.spellingPendingRetryCount - 1) : 0;
           return {
             ...word,
             ...spellingState,
             ...(suppressRepetitionGain ? {
-              spellingInterval: 1,
-              spellingDueDate: tomorrow,
+              spellingInterval: remaining > 0 ? 0 : 1,
+              spellingDueDate: remaining > 0 ? todayStr : tomorrow,
             } : {}),
+            spellingPendingRetryCount: remaining,
           };
         }
 
@@ -156,23 +160,26 @@ export async function submitReview(
           : rawReadingState;
 
         if (grade === 'forgotten' && !suppressRepetitionGain) {
-          // 第一次彻底陌生：仍保留在今天，等待同日队尾再复习一遍
+          // 第一次彻底陌生：仍保留在今天，等待同日队尾再复习两遍
           return {
             ...word,
             ...readingState,
             interval: 0,
             dueDate: todayStr,
             needsSpelling: false,
+            pendingRetryCount: 2,
           };
         }
 
+        const remaining = suppressRepetitionGain ? Math.max(0, word.pendingRetryCount - 1) : 0;
         return {
           ...word,
           ...readingState,
           ...(suppressRepetitionGain ? {
-            interval: 1,
-            dueDate: tomorrow,
+            interval: remaining > 0 ? 0 : 1,
+            dueDate: remaining > 0 ? todayStr : tomorrow,
           } : {}),
+          pendingRetryCount: remaining,
           // 拼写/会写队列资格始终跟随读熟悉度：达到阈值加入，跌破阈值移出。
           needsSpelling: readingState.repetitions >= READ_FAMILIAR_THRESHOLD,
         };

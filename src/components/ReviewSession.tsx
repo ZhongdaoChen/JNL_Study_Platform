@@ -87,8 +87,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     if (!current) return;
     const todayStr = today();
     const isRetryAttempt = spellingOnly
-      ? current.spellingLastGrade === 'forgotten' && current.spellingDueDate <= todayStr
-      : current.lastGrade === 'forgotten' && current.dueDate <= todayStr;
+      ? current.spellingPendingRetryCount > 0 && current.spellingDueDate <= todayStr
+      : current.pendingRetryCount > 0 && current.dueDate <= todayStr;
     setDoneCount((c) => c + 1);
     setShowExample(false);
     setGenError(null);
@@ -98,7 +98,10 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
       .then((updated) => {
         setQueue((q) => {
           const next = q.map((w) => (w.id === updated.id ? updated : w));
-          return g === 'forgotten' && !isRetryAttempt ? [...next, updated] : next;
+          const pendingRetryCount = spellingOnly
+            ? updated.spellingPendingRetryCount
+            : updated.pendingRetryCount;
+          return pendingRetryCount > 0 ? [...next, updated] : next;
         });
         onChanged();
       })
@@ -187,6 +190,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
       ? '让孩子写出这个字'
       : '让孩子拼出这个单词'
     : `让孩子读出这个${unit}`;
+  const instantLabel = spellingOnly ? (lang === 'zh' ? '秒写' : '秒拼') : GRADE_LABELS.instant;
 
   return (
     <div className="card review-card">
@@ -242,7 +246,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
             </div>
           ) : (
             <button className="link-btn" onClick={handleShowExample}>
-              看例句提示
+                {spellingOnly ? '看例句提示' : '看例句提示'}
             </button>
           )}
         </div>
@@ -276,7 +280,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
 
       <div className="grade-buttons">
         <button className="g-instant" onClick={() => grade('instant')}>
-          {GRADE_LABELS.instant}
+          {instantLabel}
         </button>
         <button className="g-mastered" onClick={() => grade('mastered')}>
           {GRADE_LABELS.mastered}
