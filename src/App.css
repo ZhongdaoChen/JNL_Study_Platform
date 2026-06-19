@@ -322,6 +322,12 @@ button {
   gap: 2ch;
   flex-wrap: wrap;
 }
+.settings-save-inline {
+  justify-content: space-between;
+}
+.settings-save-inline .config-number-input {
+  margin-right: auto;
+}
 .config-number-input {
   width: 5ch;
   min-width: 5ch;
@@ -345,6 +351,9 @@ button {
   opacity: 0.55;
   cursor: not-allowed;
   box-shadow: none;
+}
+.settings-share-section {
+  margin-top: 32px;
 }
 .share-email-input {
   flex: 1;

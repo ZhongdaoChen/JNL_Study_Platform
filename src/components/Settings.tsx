@@ -133,17 +133,23 @@ export default function Settings({
 
       <div className="countdown-config">
         <label className="field-label">中文写每天最大个数（留空 = 不限）</label>
-        <input
-          className="date-input config-number-input"
-          type="text"
-          inputMode="numeric"
-          placeholder="留空不限"
-          value={limitText['zh-write']}
-          onChange={(e) => handleLimitChange('zh-write', e.target.value)}
-        />
+        <div className="config-inline settings-save-inline">
+          <input
+            className="date-input config-number-input"
+            type="text"
+            inputMode="numeric"
+            placeholder="留空不限"
+            value={limitText['zh-write']}
+            onChange={(e) => handleLimitChange('zh-write', e.target.value)}
+          />
+          <button className="settings-save-btn" onClick={() => void onSaveConfig()} disabled={saveBusy}>
+            {saveBusy ? '提交配置中…' : '提交配置'}
+          </button>
+        </div>
+        {saveMsg && <p className="hint">{saveMsg}</p>}
       </div>
 
-      <div className="countdown-config">
+      <div className="countdown-config settings-share-section">
         <label className="field-label">数据共享账户</label>
         <div className="config-inline">
           <input
@@ -159,13 +165,6 @@ export default function Settings({
         </div>
         <span className="hint">共享后，对方账户会合并你的孩子、句子、单词和复习记录（去重），你自己的数据不变。</span>
         {shareMsg && <p className="hint">{shareMsg}</p>}
-      </div>
-
-      <div className="countdown-config">
-        <button className="settings-save-btn" onClick={() => void onSaveConfig()} disabled={saveBusy}>
-          {saveBusy ? '提交配置中…' : '提交配置'}
-        </button>
-        {saveMsg && <p className="hint">{saveMsg}</p>}
       </div>
     </div>
   );
