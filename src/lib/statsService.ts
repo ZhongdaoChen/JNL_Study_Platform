@@ -1,5 +1,5 @@
 import type { ReviewLog, Word } from './types';
-import { today, toDateStr } from './date';
+import { addDays, today, toDateStr } from './date';
 import { READ_FAMILIAR_THRESHOLD } from './sm2';
 
 // 把任意时间戳（ISO 或 YYYY-MM-DD）归一化成日期字符串
@@ -12,6 +12,7 @@ export interface Stats {
   masteredWords: number; // 已熟悉读（repetitions >= 阈值）
   learningWords: number; // 学习中
   dueToday: number; // 今日待复习
+  dueTomorrow: number; // 预测明日待复习
   reviewsTotal: number; // 累计复习次数
   streak: number; // 连续学习天数（截至今天/昨天）
   trend: { date: string; count: number }[]; // 近 7 天每日复习次数
@@ -20,9 +21,11 @@ export interface Stats {
 
 export function computeStats(words: Word[], logs: ReviewLog[]): Stats {
   const t = today();
+  const tomorrow = addDays(t, 1);
 
   const masteredWords = words.filter((w) => w.repetitions >= READ_FAMILIAR_THRESHOLD).length;
   const dueToday = words.filter((w) => w.dueDate <= t).length;
+  const dueTomorrow = words.filter((w) => w.dueDate <= tomorrow).length;
 
   // 各档累计次数
   const gradeBreakdown = { instant: 0, mastered: 0, fuzzy: 0, forgotten: 0 };
@@ -62,6 +65,7 @@ export function computeStats(words: Word[], logs: ReviewLog[]): Stats {
     masteredWords,
     learningWords: words.length - masteredWords,
     dueToday,
+    dueTomorrow,
     reviewsTotal: logs.length,
     streak,
     trend,

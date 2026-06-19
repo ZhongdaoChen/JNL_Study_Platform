@@ -47,6 +47,10 @@ export default function StatsBoard({ childId, refreshKey }: { childId: string; r
           <div className="stat-num">{stats.dueToday}</div>
           <div className="stat-label">今日待复习</div>
         </div>
+        <div className="stat-box">
+          <div className="stat-num">{stats.dueTomorrow}</div>
+          <div className="stat-label">预测明天待复习</div>
+        </div>
       </div>
 
       <div className="master-bar-wrap">
