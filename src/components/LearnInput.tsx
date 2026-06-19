@@ -45,7 +45,11 @@ export default function LearnInput({ childId, onChanged }: { childId: string; on
   }
 
   function removePreviewWord(word: string) {
-    setPreviewWords((prev) => prev?.filter((item) => item !== word) ?? null);
+    setPreviewWords((prev) => {
+      if (!prev) return null;
+      const next = prev.filter((item) => item !== word);
+      return next.length > 0 ? next : null;
+    });
   }
 
   const unit = lang === 'zh' ? '字' : '单词';
@@ -128,7 +132,6 @@ export default function LearnInput({ childId, onChanged }: { childId: string; on
             </button>
           </div>
           {busy && <p className="hint">正在写入数据库，请稍等…</p>}
-          {previewWords.length === 0 && <p className="hint">已全部删除，请重新输入内容后再拆词。</p>}
         </div>
       )}
 
