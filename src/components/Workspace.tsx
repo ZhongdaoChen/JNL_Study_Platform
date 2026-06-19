@@ -4,6 +4,7 @@ import { supabase, usingCloud } from '../lib/supabase';
 import { ADMIN_EMAIL } from '../lib/admin';
 import type { Child, Lang } from '../lib/types';
 import { LANG_LABELS } from '../lib/types';
+import { loadUserSettings, saveUserSettings, type ReviewLimits } from '../lib/userSettings';
 import LearnInput from './LearnInput';
 import ReviewSession from './ReviewSession';
 import WordList from './WordList';
@@ -22,7 +23,6 @@ const REVIEW_MODES: { key: ReviewMode; label: string; lang: Lang; spellingOnly: 
   { key: 'zh-read', label: '中文读', lang: 'zh', spellingOnly: false },
   { key: 'zh-write', label: '中文写', lang: 'zh', spellingOnly: true },
 ];
-type ReviewLimits = Record<ReviewMode, number>;
 
 // 工作区：登录后（或本地模式）显示的主体。管理孩子档案与三大模块。
 export default function Workspace({ onCompactChange }: { onCompactChange: (compact: boolean) => void }) {
@@ -37,6 +37,8 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
   const [newName, setNewName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [settingsSaveBusy, setSettingsSaveBusy] = useState(false);
+  const [settingsSaveMsg, setSettingsSaveMsg] = useState<string | null>(null);
   // 复习倒计时时长（秒），0=关闭。全局设置，持久化到 localStorage。
   const [countdownSec, setCountdownSecState] = useState<number>(() => {
     const v = Number(localStorage.getItem('review-countdown-sec'));
@@ -48,15 +50,29 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
     'zh-read': readStoredPositiveInt('review-limit-zh-read'),
     'zh-write': readStoredPositiveInt('review-limit-zh-write'),
   }));
+  const applySettings = (nextCountdownSec: number, nextDailyLimits: ReviewLimits) => {
+    const normalizedCountdownSec = normalizeNonNegativeInt(nextCountdownSec);
+    const normalizedDailyLimits: ReviewLimits = {
+      'en-read': normalizeNonNegativeInt(nextDailyLimits['en-read']),
+      'en-spell': normalizeNonNegativeInt(nextDailyLimits['en-spell']),
+      'zh-read': normalizeNonNegativeInt(nextDailyLimits['zh-read']),
+      'zh-write': normalizeNonNegativeInt(nextDailyLimits['zh-write']),
+    };
+    setCountdownSecState(normalizedCountdownSec);
+    setDailyLimits(normalizedDailyLimits);
+    localStorage.setItem('review-countdown-sec', String(normalizedCountdownSec));
+    localStorage.setItem('review-limit-en-read', String(normalizedDailyLimits['en-read']));
+    localStorage.setItem('review-limit-en-spell', String(normalizedDailyLimits['en-spell']));
+    localStorage.setItem('review-limit-zh-read', String(normalizedDailyLimits['zh-read']));
+    localStorage.setItem('review-limit-zh-write', String(normalizedDailyLimits['zh-write']));
+  };
   const setCountdownSec = (n: number) => {
-    const v = Math.max(0, Math.floor(Number(n) || 0));
-    setCountdownSecState(v);
-    localStorage.setItem('review-countdown-sec', String(v));
+    applySettings(n, dailyLimits);
+    setSettingsSaveMsg(null);
   };
   const setDailyLimit = (mode: ReviewMode, n: number) => {
-    const v = Math.max(0, Math.floor(Number(n) || 0));
-    setDailyLimits((prev) => ({ ...prev, [mode]: v }));
-    localStorage.setItem(`review-limit-${mode}`, String(v));
+    applySettings(countdownSec, { ...dailyLimits, [mode]: n });
+    setSettingsSaveMsg(null);
   };
 
   useEffect(() => {
@@ -74,6 +90,22 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
     supabase.auth.getUser().then(({ data }) => {
       setIsAdmin(data.user?.email === ADMIN_EMAIL);
     });
+  }, []);
+
+  useEffect(() => {
+    if (!usingCloud) return;
+    let active = true;
+    loadUserSettings()
+      .then((settings) => {
+        if (!active || !settings) return;
+        applySettings(settings.countdownSec, settings.dailyLimits);
+      })
+      .catch((e: any) => {
+        if (active) setError(e.message);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   // 非「录入」标签时进入精简模式，由 App 隐藏标题行
@@ -95,6 +127,23 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
   }
 
   const bump = () => setRefreshKey((k) => k + 1);
+
+  async function handleSaveSettings() {
+    if (!usingCloud) {
+      setSettingsSaveMsg('当前是本地模式，登录云端后才可跨设备同步配置。');
+      return;
+    }
+    setSettingsSaveBusy(true);
+    setSettingsSaveMsg(null);
+    try {
+      await saveUserSettings({ countdownSec, dailyLimits });
+      setSettingsSaveMsg('配置已提交并落库，之后该用户在任意设备登录都会使用这份最新配置。');
+    } catch (e: any) {
+      setSettingsSaveMsg(`提交配置失败：${e?.message || '请稍后重试'}`);
+    } finally {
+      setSettingsSaveBusy(false);
+    }
+  }
 
   return (
     <>
@@ -202,6 +251,10 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
               onCountdownChange={setCountdownSec}
               dailyLimits={dailyLimits}
               onDailyLimitChange={setDailyLimit}
+              onSaveConfig={handleSaveSettings}
+              saveBusy={settingsSaveBusy}
+              saveMsg={settingsSaveMsg}
+              cloudEnabled={usingCloud}
             />
           )}
           {tab === 'admin' && isAdmin && <AdminPanel />}
@@ -214,4 +267,8 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
 function readStoredPositiveInt(key: string): number {
   const v = Number(localStorage.getItem(key));
   return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+}
+
+function normalizeNonNegativeInt(value: number): number {
+  return Math.max(0, Math.floor(Number(value) || 0));
 }

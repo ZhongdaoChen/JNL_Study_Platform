@@ -83,6 +83,17 @@ create table if not exists feedback (
   created_at timestamptz not null default now()
 );
 
+-- 用户配置（倒计时、每日上限等），按登录用户一份保存，支持跨设备同步
+create table if not exists user_settings (
+  owner uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  countdown_sec int not null default 0,
+  review_limit_en_read int not null default 0,
+  review_limit_en_spell int not null default 0,
+  review_limit_zh_read int not null default 0,
+  review_limit_zh_write int not null default 0,
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists idx_sentences_child on sentences (child_id);
 create index if not exists idx_words_child on words (child_id);
 create index if not exists idx_words_due on words (child_id, due_date);
@@ -98,6 +109,7 @@ alter table sentences enable row level security;
 alter table words enable row level security;
 alter table review_logs enable row level security;
 alter table feedback enable row level security;
+alter table user_settings enable row level security;
 
 -- 辅助：判断某个 child 是否属于当前登录用户
 -- (用于子表策略；以 child_id 反查 children.owner)
@@ -139,6 +151,11 @@ create policy feedback_insert on feedback
 drop policy if exists feedback_select on feedback;
 create policy feedback_select on feedback
   for select using (owner = auth.uid());
+
+-- user_settings：每个用户只能读写自己的配置
+drop policy if exists user_settings_all on user_settings;
+create policy user_settings_all on user_settings
+  for all using (owner = auth.uid()) with check (owner = auth.uid());
 
 -- ============================================================
 -- 管理员总览（仅管理员邮箱可取到数据）

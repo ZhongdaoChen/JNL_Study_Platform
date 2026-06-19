@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { shareDataToEmail } from '../lib/dataShare';
 
 export default function Settings({
@@ -6,6 +6,10 @@ export default function Settings({
   onCountdownChange,
   dailyLimits,
   onDailyLimitChange,
+  onSaveConfig,
+  saveBusy,
+  saveMsg,
+  cloudEnabled,
 }: {
   countdownSec: number;
   onCountdownChange: (sec: number) => void;
@@ -16,6 +20,10 @@ export default function Settings({
     'zh-write': number;
   };
   onDailyLimitChange: (mode: 'en-read' | 'en-spell' | 'zh-read' | 'zh-write', sec: number) => void;
+  onSaveConfig: () => Promise<void>;
+  saveBusy: boolean;
+  saveMsg: string | null;
+  cloudEnabled: boolean;
 }) {
   // 用本地字符串管理输入，允许清空；空值视为关闭/不限（0）。
   const [countdownText, setCountdownText] = useState(countdownSec > 0 ? String(countdownSec) : '');
@@ -28,6 +36,16 @@ export default function Settings({
   const [shareEmail, setShareEmail] = useState('');
   const [shareBusy, setShareBusy] = useState(false);
   const [shareMsg, setShareMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCountdownText(countdownSec > 0 ? String(countdownSec) : '');
+    setLimitText({
+      'en-read': dailyLimits['en-read'] > 0 ? String(dailyLimits['en-read']) : '',
+      'en-spell': dailyLimits['en-spell'] > 0 ? String(dailyLimits['en-spell']) : '',
+      'zh-read': dailyLimits['zh-read'] > 0 ? String(dailyLimits['zh-read']) : '',
+      'zh-write': dailyLimits['zh-write'] > 0 ? String(dailyLimits['zh-write']) : '',
+    });
+  }, [countdownSec, dailyLimits]);
 
   function handleCountdownChange(v: string) {
     if (!/^\d*$/.test(v)) return;
@@ -125,6 +143,16 @@ export default function Settings({
           value={limitText['zh-write']}
           onChange={(e) => handleLimitChange('zh-write', e.target.value)}
         />
+      </div>
+
+      <div className="countdown-config">
+        <button className="settings-save-btn" onClick={() => void onSaveConfig()} disabled={saveBusy}>
+          {saveBusy ? '提交配置中…' : '提交配置'}
+        </button>
+        <span className="hint">
+          {cloudEnabled ? '提交后会落库，并在该用户的其他设备登录时自动生效。' : '当前是本地模式，提交配置不会同步到其他设备。'}
+        </span>
+        {saveMsg && <p className="hint">{saveMsg}</p>}
       </div>
 
       <div className="countdown-config">
