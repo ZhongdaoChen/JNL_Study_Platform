@@ -1,5 +1,5 @@
-// 三档复习评分（贴合 5 岁儿童的简化反馈）
-export type Grade = 'mastered' | 'fuzzy' | 'forgotten';
+// 四档复习评分（贴合儿童学习场景）
+export type Grade = 'instant' | 'mastered' | 'fuzzy' | 'forgotten';
 
 // 学习语言：英文单词 / 中文单字。两类分开记录、分开复习。
 export type Lang = 'en' | 'zh';
@@ -10,6 +10,7 @@ export const LANG_LABELS: Record<Lang, string> = {
 };
 
 export const GRADE_LABELS: Record<Grade, string> = {
+  instant: '秒读',
   mastered: '熟练',
   fuzzy: '略陌生',
   forgotten: '彻底陌生',

@@ -207,6 +207,7 @@ button {
   font-size: 17px;
   color: #fff;
 }
+.g-instant { background: #0f9d9a; }
 .g-mastered { background: #18a558; }
 .g-fuzzy { background: #f0a500; }
 .g-forgotten { background: #e25555; }

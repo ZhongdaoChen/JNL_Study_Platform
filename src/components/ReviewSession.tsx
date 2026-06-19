@@ -275,6 +275,9 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
       })()}
 
       <div className="grade-buttons">
+        <button className="g-instant" onClick={() => grade('instant')}>
+          {GRADE_LABELS.instant}
+        </button>
         <button className="g-mastered" onClick={() => grade('mastered')}>
           {GRADE_LABELS.mastered}
         </button>

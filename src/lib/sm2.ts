@@ -16,6 +16,7 @@ export const SM2_CONFIG = {
   INITIAL_EF: 2.5, // 初始熟练度因子
   MIN_EF: 1.3, // 因子下限，防止间隔塌缩为永远很短
   MAX_INTERVAL: 21, // 间隔上限（天），保持幼儿高频复习
+  EF_DELTA_INSTANT: +0.15, // 秒读 → 因子上升更多
   EF_DELTA_MASTERED: +0.1, // 熟练 → 因子上升
   EF_DELTA_FUZZY: -0.1, // 略陌生 → 因子小幅下降
   EF_DELTA_FORGOTTEN: -0.2, // 彻底陌生 → 因子较大下降
@@ -78,12 +79,12 @@ export function applyReview(
     repetitions = 0;
     ef = clampEf(ef + SM2_CONFIG.EF_DELTA_FORGOTTEN);
     interval = 1;
-  } else if (grade === 'mastered') {
-    // 熟练：连续答对次数 +1
-    repetitions += 1;
-    ef = clampEf(ef + SM2_CONFIG.EF_DELTA_MASTERED);
-    if (repetitions === 1) interval = 1; // 次日
-    else if (repetitions === 2) interval = 3; // 2-3 天
+  } else if (grade === 'instant' || grade === 'mastered') {
+    // 秒读 +1 分；熟练 +0.5 分
+    repetitions += grade === 'instant' ? 1 : 0.5;
+    ef = clampEf(ef + (grade === 'instant' ? SM2_CONFIG.EF_DELTA_INSTANT : SM2_CONFIG.EF_DELTA_MASTERED));
+    if (repetitions <= 1) interval = 1; // 次日
+    else if (repetitions <= 2) interval = 3; // 2-3 天
     else interval = Math.round(prevInterval * ef);
     interval = clampInterval(interval);
   } else {

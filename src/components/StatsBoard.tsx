@@ -57,7 +57,7 @@ export default function StatsBoard({ childId, refreshKey }: { childId: string; r
         <div className="master-bar">
           <div className="master-bar-fill" style={{ width: `${masterRate}%` }} />
         </div>
-        <p className="hint">熟练 +1，略陌生 -1（最低到 0），彻底陌生清零；repetitions 到 4 视为「已熟悉读」。</p>
+        <p className="hint">秒读 +1，熟练 +0.5，略陌生 -1（最低到 0），彻底陌生清零；repetitions 到 4 视为「已熟悉读」。</p>
       </div>
 
       <h3 className="trend-title">近 7 天复习</h3>
@@ -79,7 +79,7 @@ export default function StatsBoard({ childId, refreshKey }: { childId: string; r
       </div>
 
       <p className="hint">
-        累计复习 {stats.reviewsTotal} 次 · 熟练 {stats.gradeBreakdown.mastered} ·
+        累计复习 {stats.reviewsTotal} 次 · 秒读 {stats.gradeBreakdown.instant} · 熟练 {stats.gradeBreakdown.mastered} ·
         略陌生 {stats.gradeBreakdown.fuzzy} · 彻底陌生 {stats.gradeBreakdown.forgotten}
       </p>
     </div>

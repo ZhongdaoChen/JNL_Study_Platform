@@ -15,7 +15,7 @@ export interface Stats {
   reviewsTotal: number; // 累计复习次数
   streak: number; // 连续学习天数（截至今天/昨天）
   trend: { date: string; count: number }[]; // 近 7 天每日复习次数
-  gradeBreakdown: { mastered: number; fuzzy: number; forgotten: number }; // 各档累计次数
+  gradeBreakdown: { instant: number; mastered: number; fuzzy: number; forgotten: number }; // 各档累计次数
 }
 
 export function computeStats(words: Word[], logs: ReviewLog[]): Stats {
@@ -25,7 +25,7 @@ export function computeStats(words: Word[], logs: ReviewLog[]): Stats {
   const dueToday = words.filter((w) => w.dueDate <= t).length;
 
   // 各档累计次数
-  const gradeBreakdown = { mastered: 0, fuzzy: 0, forgotten: 0 };
+  const gradeBreakdown = { instant: 0, mastered: 0, fuzzy: 0, forgotten: 0 };
   for (const l of logs) gradeBreakdown[l.grade] += 1;
 
   // 活跃日集合：录入新词的日期 + 复习日期
