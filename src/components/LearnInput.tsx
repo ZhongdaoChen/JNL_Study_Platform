@@ -123,15 +123,12 @@ export default function LearnInput({ childId, onChanged }: { childId: string; on
             ))}
           </div>
           <div className="learn-preview-actions">
-            <button type="button" className="secondary-btn" onClick={() => setPreviewWords(null)} disabled={busy}>
-              返回修改
-            </button>
-            <button onClick={handleConfirm} disabled={busy || previewWords.length === 0}>
+            <button className="learn-preview-confirm" onClick={handleConfirm} disabled={busy || previewWords.length === 0}>
               {busy ? '正在写入数据库…' : `确认写入 ${previewWords.length} 个${unit}`}
             </button>
           </div>
           {busy && <p className="hint">正在写入数据库，请稍等…</p>}
-          {previewWords.length === 0 && <p className="hint">已全部删除，请返回修改重新拆词。</p>}
+          {previewWords.length === 0 && <p className="hint">已全部删除，请重新输入内容后再拆词。</p>}
         </div>
       )}
 
