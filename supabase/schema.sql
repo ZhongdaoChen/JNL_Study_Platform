@@ -36,7 +36,7 @@ create table if not exists words (
   needs_spelling boolean not null default false,
   interval int not null default 1,
   ef real not null default 2.5,
-  repetitions int not null default 0,
+  repetitions real not null default 0,
   due_date date not null,
   last_grade text,
   last_reviewed_at timestamptz,
@@ -44,7 +44,7 @@ create table if not exists words (
   volatility_rate int not null default 0,
   spelling_interval int not null default 0,
   spelling_ef real not null default 2.5,
-  spelling_repetitions int not null default 0,
+  spelling_repetitions real not null default 0,
   spelling_due_date date not null default current_date,
   spelling_last_grade text,
   spelling_last_reviewed_at timestamptz,
@@ -58,13 +58,15 @@ alter table words add column if not exists lang text not null default 'en';
 alter table words add column if not exists needs_spelling boolean not null default false;
 alter table words add column if not exists spelling_interval int not null default 0;
 alter table words add column if not exists spelling_ef real not null default 2.5;
-alter table words add column if not exists spelling_repetitions int not null default 0;
+alter table words add column if not exists spelling_repetitions real not null default 0;
 alter table words add column if not exists spelling_due_date date not null default current_date;
 alter table words add column if not exists spelling_last_grade text;
 alter table words add column if not exists spelling_last_reviewed_at timestamptz;
 alter table words add column if not exists pending_retry_count int not null default 0;
 alter table words add column if not exists volatility_rate int not null default 0;
 alter table words add column if not exists spelling_pending_retry_count int not null default 0;
+alter table words alter column repetitions type real using repetitions::real;
+alter table words alter column spelling_repetitions type real using spelling_repetitions::real;
 
 -- 复习日志
 create table if not exists review_logs (
@@ -214,7 +216,7 @@ returns table(
   child_name text,
   lang text,
   word text,
-  repetitions int,
+  repetitions real,
   due_date date,
   first_learned_at timestamptz
 )
