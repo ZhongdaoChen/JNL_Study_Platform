@@ -65,8 +65,9 @@ export async function addLearning(
 }
 
 // 模块2：今日复习清单
-// 取出指定语言中所有到期（dueDate <= 今天）的词，按到期日升序、同日按字母/字序（稳定）。
-// 不设上限：当天所有到期的词都会列出。
+// 取出指定语言中所有到期（dueDate <= 今天）的词。
+// 默认按到期日升序、同日按字母/字序（稳定）；英文读触发每日上限时，先保底选择已过期 3 天的词，
+// 再优先挑波动率高的到期词。
 // 进度记忆：每次评分会立即更新该词的 dueDate（推到未来），评过的词即退出到期池，
 // 因此下次重新进入复习页时只返回尚未复习的词，自动从上次进度继续。
 export async function getDueReviews(
@@ -82,13 +83,29 @@ export async function getDueReviews(
     .filter((w) => w.lang === lang)
     .filter((w) => !spellingOnly || w.repetitions >= READ_FAMILIAR_THRESHOLD)
     .filter((w) => dateLte(spellingOnly ? w.spellingDueDate : w.dueDate, t))
-    .sort((a, b) => {
-      const aDue = spellingOnly ? a.spellingDueDate : a.dueDate;
-      const bDue = spellingOnly ? b.spellingDueDate : b.dueDate;
-      if (aDue !== bDue) return aDue < bDue ? -1 : 1;
-      return a.text < b.text ? -1 : a.text > b.text ? 1 : 0;
-    });
-  return maxCount > 0 ? due.slice(0, maxCount) : due;
+    .sort((a, b) => compareDueThenText(a, b, spellingOnly));
+  if (maxCount <= 0 || due.length <= maxCount) return due;
+  if (lang === 'en' && !spellingOnly) {
+    const overdueCutoff = addDays(t, -3);
+    return [...due]
+      .sort((a, b) => {
+        const aOverdue = dateLte(a.dueDate, overdueCutoff);
+        const bOverdue = dateLte(b.dueDate, overdueCutoff);
+        if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
+        if (aOverdue && bOverdue) return compareDueThenText(a, b, spellingOnly);
+        if (a.volatilityRate !== b.volatilityRate) return b.volatilityRate - a.volatilityRate;
+        return compareDueThenText(a, b, spellingOnly);
+      })
+      .slice(0, maxCount);
+  }
+  return due.slice(0, maxCount);
+}
+
+function compareDueThenText(a: Word, b: Word, spellingOnly: boolean): number {
+  const aDue = spellingOnly ? a.spellingDueDate : a.dueDate;
+  const bDue = spellingOnly ? b.spellingDueDate : b.dueDate;
+  if (aDue !== bDue) return aDue < bDue ? -1 : 1;
+  return a.text < b.text ? -1 : a.text > b.text ? 1 : 0;
 }
 
 // 模块3：提交复习反馈，更新 SM-2 状态并记日志

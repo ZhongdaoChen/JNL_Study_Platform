@@ -5,6 +5,7 @@ import { generateExampleSentence } from '../lib/ai';
 import type { Grade, Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 import { today } from '../lib/date';
+import { toChineseCount } from '../lib/chineseNumerals';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
 export default function ReviewSession({ childId, lang, spellingOnly, countdownSec, dailyLimit, onChanged }: {
@@ -214,8 +215,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
           🗑
         </button>
       </div>
-      <h2>🔁 今日{modeLabel}（共 {queue.length} 个）</h2>
-      <p className="hint">第 {idx + 1} / {queue.length} 个 · {action}</p>
+      <h2>🔁 今日{modeLabel}（共 {toChineseCount(queue.length)} 个）</h2>
+      <p className="hint">第 {toChineseCount(idx + 1)} / {toChineseCount(queue.length)} 个 · {action}</p>
 
       <div className="word-row">
         <button
