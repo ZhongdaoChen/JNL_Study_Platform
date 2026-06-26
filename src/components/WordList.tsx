@@ -4,6 +4,7 @@ import type { Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 import { today } from '../lib/date';
 import { READ_FAMILIAR_THRESHOLD, SPELLING_FAMILIAR_THRESHOLD } from '../lib/sm2';
+import { sortWords, type WordSort, type WordSortKey } from '../lib/wordSort';
 
 type WordFilter = 'all' | 'read-unfamiliar' | 'read-familiar' | 'spell-unfamiliar' | 'spell-familiar';
 
@@ -16,12 +17,12 @@ export default function WordList({ childId, lang, refreshKey }: {
   const [words, setWords] = useState<Word[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<WordFilter>('all');
+  const [sort, setSort] = useState<WordSort>({ key: 'dueDate', direction: 'asc' });
 
   function reload() {
     repo.getWords(childId).then((ws) => {
       const nextWords = ws
-        .filter((w) => w.lang === lang)
-        .sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1));
+        .filter((w) => w.lang === lang);
       setWords(nextWords);
       setSelected(new Set());
     });
@@ -46,15 +47,23 @@ export default function WordList({ childId, lang, refreshKey }: {
       allChecked
         ? (() => {
             const next = new Set(prev);
-            for (const w of filteredWords) next.delete(w.id);
+            for (const w of sortedWords) next.delete(w.id);
             return next;
           })()
         : (() => {
             const next = new Set(prev);
-            for (const w of filteredWords) next.add(w.id);
+            for (const w of sortedWords) next.add(w.id);
             return next;
           })(),
     );
+  }
+
+  function toggleSort(key: WordSortKey) {
+    setSort((prev) => (
+      prev.key === key
+        ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+        : { key, direction: 'asc' }
+    ));
   }
 
   async function deleteSelected() {
@@ -82,8 +91,9 @@ export default function WordList({ childId, lang, refreshKey }: {
   const t = today();
   const dueCount = words.filter((w) => w.dueDate <= t).length;
   const filteredWords = words.filter((w) => matchFilter(w, filter));
-  const visibleSelected = filteredWords.filter((w) => selected.has(w.id)).length;
-  const allChecked = filteredWords.length > 0 && visibleSelected === filteredWords.length;
+  const sortedWords = sortWords(filteredWords, sort);
+  const visibleSelected = sortedWords.filter((w) => selected.has(w.id)).length;
+  const allChecked = sortedWords.length > 0 && visibleSelected === sortedWords.length;
 
   if (words.length === 0) {
     return (
@@ -139,7 +149,7 @@ export default function WordList({ childId, lang, refreshKey }: {
         </button>
       </div>
 
-      {filteredWords.length === 0 ? (
+      {sortedWords.length === 0 ? (
         <p className="hint">当前筛选下没有符合条件的{unit}。</p>
       ) : (
         <table className="word-table">
@@ -147,9 +157,17 @@ export default function WordList({ childId, lang, refreshKey }: {
             <tr>
               <th></th>
               <th>{unit}</th>
-              <th>下次复习</th>
+              <th>
+                <button className="table-sort-btn" onClick={() => toggleSort('dueDate')}>
+                  下次复习{sortIndicator(sort, 'dueDate')}
+                </button>
+              </th>
               <th>间隔(天)</th>
-              <th>读熟练度</th>
+              <th>
+                <button className="table-sort-btn" onClick={() => toggleSort('readProficiency')}>
+                  读熟练度{sortIndicator(sort, 'readProficiency')}
+                </button>
+              </th>
               <th>拼写熟练度</th>
               <th>熟练度波动率</th>
               <th>上次</th>
@@ -157,7 +175,7 @@ export default function WordList({ childId, lang, refreshKey }: {
             </tr>
           </thead>
           <tbody>
-            {filteredWords.map((w) => (
+            {sortedWords.map((w) => (
               <tr
                 key={w.id}
                 className={selected.has(w.id) ? 'row-selected' : w.dueDate <= t ? 'row-due' : ''}
@@ -205,6 +223,11 @@ function matchFilter(w: Word, filter: WordFilter): boolean {
     default:
       return true;
   }
+}
+
+function sortIndicator(sort: WordSort, key: WordSortKey): string {
+  if (sort.key !== key) return '';
+  return sort.direction === 'asc' ? ' ↑' : ' ↓';
 }
 
 function formatReadProficiency(repetitions: number): string {

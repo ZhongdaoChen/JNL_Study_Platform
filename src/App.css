@@ -391,6 +391,21 @@ button {
   padding: 8px 6px;
   border-bottom: 1px solid #eee;
 }
+
+.table-sort-btn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.table-sort-btn:hover {
+  color: #b45309;
+}
+
 .row-due { background: #fff7e6; }
 
 .auth-bar {
