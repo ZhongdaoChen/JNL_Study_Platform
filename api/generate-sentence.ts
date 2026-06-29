@@ -50,8 +50,9 @@ export default async function handler(req: any, res: any) {
           {
             role: 'system',
             content:
-              'You write simple English example sentences for a child at around US 5th-grade (primary school, age 10-11) reading level. ' +
-              'Use everyday vocabulary a 5th grader would know. Output EXACTLY one sentence, preferably 5 to 10 words long. ' +
+              'You write simple English example sentences using everyday vocabulary at around US 3rd-grade reading level. ' +
+              'The sentence MUST be funny, silly, and kid-friendly so a 5-year-old child would enjoy it. ' +
+              'Output EXACTLY one sentence, preferably 5 to 10 words long. ' +
               'No quotes, no translation, no extra text, no explanations.',
           },
           {
