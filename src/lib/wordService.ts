@@ -85,20 +85,7 @@ export async function getDueReviews(
     .filter((w) => dateLte(spellingOnly ? w.spellingDueDate : w.dueDate, t))
     .sort((a, b) => compareDueThenText(a, b, spellingOnly));
   if (maxCount <= 0 || due.length <= maxCount) return due;
-  if (lang === 'en' && !spellingOnly) {
-    const overdueCutoff = addDays(t, -3);
-    return [...due]
-      .sort((a, b) => {
-        const aOverdue = dateLte(a.dueDate, overdueCutoff);
-        const bOverdue = dateLte(b.dueDate, overdueCutoff);
-        if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
-        if (aOverdue && bOverdue) return compareDueThenText(a, b, spellingOnly);
-        if (a.volatilityRate !== b.volatilityRate) return b.volatilityRate - a.volatilityRate;
-        return compareDueThenText(a, b, spellingOnly);
-      })
-      .slice(0, maxCount);
-  }
-  return due.slice(0, maxCount);
+  return selectDueReviews(due, maxCount, spellingOnly, t);
 }
 
 function compareDueThenText(a: Word, b: Word, spellingOnly: boolean): number {
@@ -106,6 +93,106 @@ function compareDueThenText(a: Word, b: Word, spellingOnly: boolean): number {
   const bDue = spellingOnly ? b.spellingDueDate : b.dueDate;
   if (aDue !== bDue) return aDue < bDue ? -1 : 1;
   return a.text < b.text ? -1 : a.text > b.text ? 1 : 0;
+}
+
+function selectDueReviews(
+  due: Word[],
+  maxCount: number,
+  spellingOnly: boolean,
+  todayStr: string,
+): Word[] {
+  const severeCutoff = addDays(todayStr, -3);
+  const quotas = reviewQuotas(maxCount);
+  const selected: Word[] = [];
+  const selectedIds = new Set<string>();
+
+  const severeOverdue = due
+    .filter((w) => dateLte(dueDateForMode(w, spellingOnly), severeCutoff))
+    .sort((a, b) => compareDueThenText(a, b, spellingOnly));
+  const unstable = due
+    .filter((w) => !dateLte(dueDateForMode(w, spellingOnly), severeCutoff))
+    .filter((w) => isUnstable(w, spellingOnly))
+    .sort((a, b) => compareUnstable(a, b, spellingOnly));
+  const normal = due
+    .filter((w) => !dateLte(dueDateForMode(w, spellingOnly), severeCutoff))
+    .filter((w) => !isUnstable(w, spellingOnly))
+    .sort((a, b) => compareDueThenText(a, b, spellingOnly));
+
+  takeUnique(selected, severeOverdue, quotas.severeOverdue, selectedIds);
+  takeUnique(selected, unstable, quotas.unstable, selectedIds);
+  takeUnique(selected, normal, quotas.normal, selectedIds);
+
+  if (selected.length < maxCount) {
+    takeUnique(
+      selected,
+      [...severeOverdue, ...unstable, ...normal],
+      maxCount - selected.length,
+      selectedIds,
+    );
+  }
+
+  return selected;
+}
+
+function reviewQuotas(maxCount: number): { severeOverdue: number; unstable: number; normal: number } {
+  const weighted = [
+    { key: 'severeOverdue' as const, weight: 0.5, value: maxCount * 0.5 },
+    { key: 'unstable' as const, weight: 0.3, value: maxCount * 0.3 },
+    { key: 'normal' as const, weight: 0.2, value: maxCount * 0.2 },
+  ];
+  const quotas = {
+    severeOverdue: Math.floor(weighted[0].value),
+    unstable: Math.floor(weighted[1].value),
+    normal: Math.floor(weighted[2].value),
+  };
+  let remaining = maxCount - quotas.severeOverdue - quotas.unstable - quotas.normal;
+  weighted
+    .sort((a, b) => {
+      const fractionDiff = (b.value - Math.floor(b.value)) - (a.value - Math.floor(a.value));
+      if (fractionDiff !== 0) return fractionDiff;
+      return b.weight - a.weight;
+    })
+    .forEach(({ key }) => {
+      if (remaining <= 0) return;
+      quotas[key] += 1;
+      remaining -= 1;
+    });
+  return quotas;
+}
+
+function takeUnique(
+  target: Word[],
+  candidates: Word[],
+  count: number,
+  selectedIds: Set<string>,
+): void {
+  let taken = 0;
+  for (const word of candidates) {
+    if (taken >= count) return;
+    if (selectedIds.has(word.id)) continue;
+    target.push(word);
+    selectedIds.add(word.id);
+    taken += 1;
+  }
+}
+
+function dueDateForMode(word: Word, spellingOnly: boolean): string {
+  return spellingOnly ? word.spellingDueDate : word.dueDate;
+}
+
+function isUnstable(word: Word, spellingOnly: boolean): boolean {
+  const lastGrade = spellingOnly ? word.spellingLastGrade : word.lastGrade;
+  return lastGrade === 'forgotten' || lastGrade === 'fuzzy' || word.volatilityRate > 0;
+}
+
+function compareUnstable(a: Word, b: Word, spellingOnly: boolean): number {
+  const aLastGrade = spellingOnly ? a.spellingLastGrade : a.lastGrade;
+  const bLastGrade = spellingOnly ? b.spellingLastGrade : b.lastGrade;
+  const aRecentlyWeak = aLastGrade === 'forgotten' || aLastGrade === 'fuzzy';
+  const bRecentlyWeak = bLastGrade === 'forgotten' || bLastGrade === 'fuzzy';
+  if (aRecentlyWeak !== bRecentlyWeak) return aRecentlyWeak ? -1 : 1;
+  if (a.volatilityRate !== b.volatilityRate) return b.volatilityRate - a.volatilityRate;
+  return compareDueThenText(a, b, spellingOnly);
 }
 
 // 模块3：提交复习反馈，更新 SM-2 状态并记日志

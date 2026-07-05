@@ -252,6 +252,21 @@ button {
 .example-area {
   margin-top: 12px;
 }
+.example-image {
+  display: block;
+  width: min(260px, 100%);
+  aspect-ratio: 1;
+  object-fit: cover;
+  margin: 14px auto 0;
+  border-radius: 16px;
+  border: 1px solid #e4e7f2;
+  background: #f5f6fb;
+  box-shadow: 0 10px 26px rgba(44, 51, 73, 0.12);
+}
+.example-image-status {
+  font-size: 14px;
+  color: #777;
+}
 .example-error {
   margin-top: 12px;
   font-size: 14px;

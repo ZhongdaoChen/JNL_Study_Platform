@@ -7,6 +7,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v1.8.0',
+    date: '2026-06-23',
+    items: [
+      '英文读复习如果超过每日最大个数，会优先安排熟练度波动率更高的到期单词。',
+      '波动率只影响今天已到期单词的优先级，不会提前复习未来才到期的单词。',
+    ],
+  },
+  {
     version: 'v1.7.0',
     date: '2026-06-18',
     items: [

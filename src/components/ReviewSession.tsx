@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { repo } from '../lib/db';
 import { getDueReviews, submitReview } from '../lib/wordService';
-import { generateExampleSentence } from '../lib/ai';
+import { generateExampleImage, generateExampleSentence } from '../lib/ai';
 import type { Grade, Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 import { today } from '../lib/date';
@@ -21,6 +21,9 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   const [showExample, setShowExample] = useState(false);
   const [genLoading, setGenLoading] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
+  const [exampleImageUrl, setExampleImageUrl] = useState<string | null>(null);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -28,6 +31,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   const [remainMs, setRemainMs] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const remainRef = useRef(0);
+  const imageRequestRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -40,6 +44,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
       setDoneCount(0);
       setShowExample(false);
       setGenError(null);
+      clearExampleImage();
       setSaveError(null);
       setLoading(false);
     })();
@@ -51,6 +56,13 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   }, [childId, lang, spellingOnly, dailyLimit]);
 
   const current = queue[idx];
+
+  function clearExampleImage() {
+    imageRequestRef.current += 1;
+    setExampleImageUrl(null);
+    setImageLoading(false);
+    setImageError(null);
+  }
 
   // 始终持有最新的 grade，供倒计时回调调用（避免把 grade 放进定时器依赖导致重置）
   const gradeRef = useRef<(g: Grade) => void>(() => {});
@@ -93,6 +105,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     setDoneCount((c) => c + 1);
     setShowExample(false);
     setGenError(null);
+    clearExampleImage();
     setSaveError(null);
     setIdx((i) => i + 1);
     submitReview(repo, current, g, spellingOnly, isRetryAttempt)
@@ -106,8 +119,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         });
         onChanged();
       })
-      .catch((e: any) => {
-        setSaveError(`「${current.text}」保存失败：${e?.message || '请检查网络'}`);
+      .catch((e: unknown) => {
+        setSaveError(`「${current.text}」保存失败：${errorMessage(e, '请检查网络')}`);
       });
   }
   gradeRef.current = grade;
@@ -116,22 +129,46 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   function goTo(i: number) {
     setShowExample(false);
     setGenError(null);
+    clearExampleImage();
     setIdx(Math.min(Math.max(i, 0), queue.length - 1));
+  }
+
+  async function generateImageFor(sentence: string, word: Word) {
+    const requestId = imageRequestRef.current + 1;
+    imageRequestRef.current = requestId;
+    setExampleImageUrl(null);
+    setImageLoading(true);
+    setImageError(null);
+    try {
+      const imageUrl = await generateExampleImage(sentence, word.text, lang);
+      if (imageRequestRef.current === requestId) setExampleImageUrl(imageUrl);
+    } catch (e: unknown) {
+      if (imageRequestRef.current === requestId) {
+        setImageError(errorMessage(e, '图片生成失败'));
+      }
+    } finally {
+      if (imageRequestRef.current === requestId) setImageLoading(false);
+    }
   }
 
   // 生成例句并落库；force=true 时强制重新生成（换一句）
   async function generate(force: boolean) {
     if (!current) return;
-    if (!force && current.exampleSentence) return; // 已有则不重复生成
+    if (!force && current.exampleSentence) {
+      if (!exampleImageUrl && !imageLoading) void generateImageFor(current.exampleSentence, current);
+      return; // 已有例句则不重复生成，只补当前临时配图
+    }
     setGenLoading(true);
     setGenError(null);
+    clearExampleImage();
     try {
       const sentence = await generateExampleSentence(current.text, lang);
       const updated: Word = { ...current, exampleSentence: sentence };
       await repo.upsertWord(updated);
       setQueue((q) => q.map((w) => (w.id === updated.id ? updated : w)));
-    } catch (e: any) {
-      setGenError(e?.message || '生成失败');
+      void generateImageFor(sentence, updated);
+    } catch (e: unknown) {
+      setGenError(errorMessage(e, '生成失败'));
     } finally {
       setGenLoading(false);
     }
@@ -139,7 +176,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
 
   function handleShowExample() {
     setShowExample(true);
-    if (current && !current.exampleSentence) generate(false);
+    if (current) generate(false);
   }
 
   // 删除当前复习的词：从队列移除并跳到下一个
@@ -151,7 +188,12 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     setQueue((q) => q.filter((w) => w.id !== target.id));
     setShowExample(false);
     setGenError(null);
+    clearExampleImage();
     onChanged();
+  }
+
+  function errorMessage(e: unknown, fallback: string): string {
+    return e instanceof Error ? e.message : fallback;
   }
 
   function togglePause() {
@@ -239,10 +281,23 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
               ) : genError ? (
                 <p className="example-error">{genError}</p>
               ) : (
-                <p className="context">{current.exampleSentence ?? '（暂无例句）'}</p>
+                <>
+                  <p className="context">{current.exampleSentence ?? '（暂无例句）'}</p>
+                  {imageLoading ? (
+                    <p className="context example-image-status">🎨 AI正在生成图片…</p>
+                  ) : imageError ? (
+                    <p className="example-error">图片生成失败：{imageError}</p>
+                  ) : exampleImageUrl ? (
+                    <img
+                      className="example-image"
+                      src={exampleImageUrl}
+                      alt={`AI生成的例句配图：${current.exampleSentence ?? current.text}`}
+                    />
+                  ) : null}
+                </>
               )}
-              <button className="link-btn" onClick={() => generate(true)} disabled={genLoading}>
-                {genLoading ? '生成中…' : '🔄 换一句'}
+              <button className="link-btn" onClick={() => generate(true)} disabled={genLoading || imageLoading}>
+                {genLoading ? '生成中…' : imageLoading ? '画图中…' : '🔄 换一句'}
               </button>
             </div>
           ) : (
