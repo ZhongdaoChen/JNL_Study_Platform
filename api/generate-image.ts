@@ -1,4 +1,4 @@
-// Vercel Serverless Function：服务端代理调用百炼 z-image-turbo 生成例句配图。
+// Vercel Serverless Function：服务端代理调用百炼 Qwen-Image-2.0 生成例句配图。
 // QWEN_API_KEY 通过服务端环境变量注入，绝不暴露给前端。
 
 const Z_IMAGE_URL =
@@ -52,8 +52,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
   const prompt =
     lang === 'zh'
-      ? `为5岁儿童画一张温暖、简单、彩色的绘本插画，表现这个例句的意思：「${sentence}」。画面自然包含「${word}」的含义。不要文字、字母、字幕、标志或水印。`
-      : `Create a warm, simple, colorful picture-book illustration for a 5-year-old child that shows this example sentence: "${sentence}". Make the meaning of "${word}" clear in the scene. No text, letters, captions, logos, or watermarks.`;
+      ? `为5岁儿童画一张温暖、简单、彩色、卡通风格的绘本插画，表现这个例句的意思：「${sentence}」。画面自然包含「${word}」的含义。不要文字、字母、字幕、标志或水印。`
+      : `Create a warm, simple, colorful, cartoon-style picture-book illustration for a 5-year-old child that shows this example sentence: "${sentence}". Make the meaning of "${word}" clear in the scene. No text, letters, captions, logos, or watermarks.`;
 
   try {
     const r = await fetch(Z_IMAGE_URL, {
@@ -63,7 +63,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'z-image-turbo',
+        model: 'qwen-image-2.0',
         input: {
           messages: [
             {
@@ -74,6 +74,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         },
         parameters: {
           prompt_extend: false,
+          watermark: false,
           size: '1024*1024',
         },
       }),
@@ -81,7 +82,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     if (!r.ok) {
       const detail = await r.text();
-      res.status(502).json({ error: 'z-image-turbo 接口返回错误', detail: detail.slice(0, 500) });
+      res.status(502).json({ error: 'Qwen-Image-2.0 接口返回错误', detail: detail.slice(0, 500) });
       return;
     }
 

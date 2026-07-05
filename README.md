@@ -15,7 +15,7 @@
 ## 技术栈
 - 前端：React + TypeScript + Vite（纯静态，PWA 方向）
 - 后端：Supabase（Postgres + Auth + RLS 行级安全多用户隔离）
-- AI 例句：Vercel Serverless 代理调用通义千问（qwen-turbo）和 z-image-turbo
+- AI 例句：Vercel Serverless 代理调用通义千问（qwen-turbo）和 Qwen-Image-2.0
 - 存储模式：配置了 Supabase env 时走云端同步，否则自动回退到浏览器本地存储，可立即试用。
 
 ## 本地运行
@@ -34,7 +34,7 @@ npm run dev
 - `src/lib/userSettings.ts` / `dataShare.ts` — 用户配置云端同步与账户间数据共享
 - `src/lib/admin.ts` / `changelog.ts` — 管理员 RPC 与版本日志
 - `src/components/` — 各功能模块界面（AuthGate / Workspace / 录入 / 复习 / 总览 / 统计 / 配置 / 管理员）
-- `api/generate-sentence.ts` / `api/generate-image.ts` — Vercel Serverless：服务端代理调通义千问和 z-image-turbo（读 `QWEN_API_KEY`）
+- `api/generate-sentence.ts` / `api/generate-image.ts` — Vercel Serverless：服务端代理调通义千问和 Qwen-Image-2.0（读 `QWEN_API_KEY`）
 - `supabase/schema.sql` — 数据库结构 + RLS 多用户策略 + 管理员 / 数据共享 RPC（幂等，可重复执行）
 
 ## 接入 Supabase（多设备同步）
