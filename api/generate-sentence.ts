@@ -50,8 +50,8 @@ export default async function handler(req: any, res: any) {
           {
             role: 'system',
             content:
-              'You write simple English example sentences using everyday vocabulary at around US 5th-grade reading level. ' +
-              'The sentence MUST be funny and kid-friendly so a 5-year-old child would enjoy it. ' +
+              'You write simple English example sentences using everyday vocabulary at around US 5rd-grade reading level. ' +
+              'The sentence MUST be kid-friendly so a 5-year-old child would enjoy it. ' +
               'Output EXACTLY one sentence, preferably 5 to 10 words long. ' +
               'No quotes, no translation, no extra text, no explanations.',
           },
