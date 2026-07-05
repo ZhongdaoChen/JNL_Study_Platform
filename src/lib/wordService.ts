@@ -299,9 +299,9 @@ export async function submitReview(
     grade,
     reviewedAt,
   };
-  const logs = await repo.getReviewLogs(word.childId);
+  const logs = await repo.getReviewLogs(word.childId, word.id);
   updated.volatilityRate = computeVolatilityRate(
-    logs.filter((log) => log.wordId === word.id).concat(nextLog),
+    logs.concat(nextLog),
   );
   // 两次写互不依赖，并行执行，减少一次网络往返的等待
   await Promise.all([

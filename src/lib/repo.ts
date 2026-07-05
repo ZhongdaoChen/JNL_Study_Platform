@@ -19,7 +19,7 @@ export interface Repo {
 
   // 复习日志
   addReviewLog(log: ReviewLog): Promise<void>;
-  getReviewLogs(childId: string): Promise<ReviewLog[]>;
+  getReviewLogs(childId: string, wordId?: string): Promise<ReviewLog[]>;
 
   // 用户建议 / 需求反馈
   addFeedback(content: string): Promise<void>;

@@ -114,8 +114,8 @@ export class LocalRepo implements Repo {
     save(db);
   }
 
-  async getReviewLogs(childId: string): Promise<ReviewLog[]> {
-    return load().reviewLogs.filter((l) => l.childId === childId);
+  async getReviewLogs(childId: string, wordId?: string): Promise<ReviewLog[]> {
+    return load().reviewLogs.filter((l) => l.childId === childId && (!wordId || l.wordId === wordId));
   }
 
   async addFeedback(content: string): Promise<void> {

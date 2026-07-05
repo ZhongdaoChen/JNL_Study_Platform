@@ -4,6 +4,8 @@ import type { Repo } from './repo';
 import { initialSpellingReviewState } from './sm2';
 import { capitalizeWord } from './tokenizer';
 
+const SUPABASE_PAGE_SIZE = 1000;
+
 // Supabase 实现：数据存云端 Postgres，RLS 自动按登录用户隔离。
 // UI 通过 Repo 接口调用，与 LocalRepo 完全可互换。
 
@@ -157,13 +159,28 @@ export class SupabaseRepo implements Repo {
     if (error) this.fail('addReviewLog', error);
   }
 
-  async getReviewLogs(childId: string): Promise<ReviewLog[]> {
-    const { data, error } = await this.sb
-      .from('review_logs')
-      .select('*')
-      .eq('child_id', childId);
-    if (error) this.fail('getReviewLogs', error);
-    return (data ?? []).map((r: any) => ({
+  async getReviewLogs(childId: string, wordId?: string): Promise<ReviewLog[]> {
+    const rows: any[] = [];
+    let from = 0;
+
+    while (true) {
+      let query = this.sb
+        .from('review_logs')
+        .select('*')
+        .eq('child_id', childId)
+        .order('reviewed_at', { ascending: true })
+        .order('id', { ascending: true });
+      if (wordId) query = query.eq('word_id', wordId);
+      const { data, error } = await query.range(from, from + SUPABASE_PAGE_SIZE - 1);
+      if (error) this.fail('getReviewLogs', error);
+
+      const page = data ?? [];
+      rows.push(...page);
+      if (page.length < SUPABASE_PAGE_SIZE) break;
+      from += SUPABASE_PAGE_SIZE;
+    }
+
+    return rows.map((r: any) => ({
       id: r.id,
       wordId: r.word_id,
       childId: r.child_id,
