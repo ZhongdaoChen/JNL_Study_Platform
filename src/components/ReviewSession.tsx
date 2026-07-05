@@ -24,6 +24,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   const [exampleImageUrl, setExampleImageUrl] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [prefetchedWordId, setPrefetchedWordId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -31,6 +32,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   const [remainMs, setRemainMs] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const remainRef = useRef(0);
+  const exampleRequestRef = useRef(0);
   const imageRequestRef = useRef(0);
 
   useEffect(() => {
@@ -44,7 +46,9 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
       setDoneCount(0);
       setShowExample(false);
       setGenError(null);
+      exampleRequestRef.current += 1;
       clearExampleImage();
+      setPrefetchedWordId(null);
       setSaveError(null);
       setLoading(false);
     })();
@@ -105,7 +109,9 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     setDoneCount((c) => c + 1);
     setShowExample(false);
     setGenError(null);
+    exampleRequestRef.current += 1;
     clearExampleImage();
+    setPrefetchedWordId(null);
     setSaveError(null);
     setIdx((i) => i + 1);
     submitReview(repo, current, g, spellingOnly, isRetryAttempt)
@@ -129,7 +135,9 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   function goTo(i: number) {
     setShowExample(false);
     setGenError(null);
+    exampleRequestRef.current += 1;
     clearExampleImage();
+    setPrefetchedWordId(null);
     setIdx(Math.min(Math.max(i, 0), queue.length - 1));
   }
 
@@ -151,6 +159,22 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     }
   }
 
+  async function prefetchExampleForCurrent(word: Word) {
+    if (prefetchedWordId === word.id || genLoading || imageLoading) return;
+    setPrefetchedWordId(word.id);
+    if (word.exampleSentence) {
+      if (!exampleImageUrl) void generateImageFor(word.exampleSentence, word);
+      return;
+    }
+    await generate(false);
+  }
+
+  useEffect(() => {
+    if (!current) return;
+    const id = window.setTimeout(() => void prefetchExampleForCurrent(current), 0);
+    return () => window.clearTimeout(id);
+  }, [current?.id]);
+
   // 生成例句并落库；force=true 时强制重新生成（换一句）
   async function generate(force: boolean) {
     if (!current) return;
@@ -158,25 +182,30 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
       if (!exampleImageUrl && !imageLoading) void generateImageFor(current.exampleSentence, current);
       return; // 已有例句则不重复生成，只补当前临时配图
     }
+    const requestId = exampleRequestRef.current + 1;
+    exampleRequestRef.current = requestId;
     setGenLoading(true);
     setGenError(null);
     clearExampleImage();
     try {
       const sentence = await generateExampleSentence(current.text, lang);
+      if (exampleRequestRef.current !== requestId) return;
       const updated: Word = { ...current, exampleSentence: sentence };
       await repo.upsertWord(updated);
+      if (exampleRequestRef.current !== requestId) return;
       setQueue((q) => q.map((w) => (w.id === updated.id ? updated : w)));
       void generateImageFor(sentence, updated);
     } catch (e: unknown) {
-      setGenError(errorMessage(e, '生成失败'));
+      if (exampleRequestRef.current === requestId) {
+        setGenError(errorMessage(e, '生成失败'));
+      }
     } finally {
-      setGenLoading(false);
+      if (exampleRequestRef.current === requestId) setGenLoading(false);
     }
   }
 
   function handleShowExample() {
     setShowExample(true);
-    if (current) generate(false);
   }
 
   // 删除当前复习的词：从队列移除并跳到下一个
@@ -188,7 +217,9 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     setQueue((q) => q.filter((w) => w.id !== target.id));
     setShowExample(false);
     setGenError(null);
+    exampleRequestRef.current += 1;
     clearExampleImage();
+    setPrefetchedWordId(null);
     onChanged();
   }
 
