@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldToggleCountdownPause } from '../src/components/reviewKeyboard.ts';
+import {
+  releaseReviewActionFocus,
+  shouldToggleCountdownPause,
+} from '../src/components/reviewKeyboard.ts';
 
 function target(interactive: boolean) {
   return {
@@ -45,4 +48,17 @@ test('space does not toggle countdown pause when countdown is disabled', () => {
     }),
     false,
   );
+});
+
+test('review action buttons release focus after click', () => {
+  let blurCount = 0;
+  const button = {
+    blur: () => {
+      blurCount += 1;
+    },
+  } as HTMLElement;
+
+  releaseReviewActionFocus(button);
+
+  assert.equal(blurCount, 1);
 });

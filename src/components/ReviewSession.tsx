@@ -6,7 +6,7 @@ import type { Grade, Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 import { today } from '../lib/date';
 import { toChineseCount } from '../lib/chineseNumerals';
-import { shouldToggleCountdownPause } from './reviewKeyboard';
+import { releaseReviewActionFocus, shouldToggleCountdownPause } from './reviewKeyboard';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
 export default function ReviewSession({ childId, lang, spellingOnly, countdownSec, dailyLimit, onChanged }: {
@@ -233,6 +233,11 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     setIsPaused((v) => !v);
   }
 
+  function gradeFromButton(g: Grade, button: HTMLButtonElement) {
+    releaseReviewActionFocus(button);
+    grade(g);
+  }
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (!shouldToggleCountdownPause({
@@ -386,16 +391,28 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
       })()}
 
       <div className="grade-buttons">
-        <button className="g-instant" onClick={() => grade('instant')}>
+        <button
+          className="g-instant"
+          onClick={(event) => gradeFromButton('instant', event.currentTarget)}
+        >
           {instantLabel}
         </button>
-        <button className="g-mastered" onClick={() => grade('mastered')}>
+        <button
+          className="g-mastered"
+          onClick={(event) => gradeFromButton('mastered', event.currentTarget)}
+        >
           {GRADE_LABELS.mastered}
         </button>
-        <button className="g-fuzzy" onClick={() => grade('fuzzy')}>
+        <button
+          className="g-fuzzy"
+          onClick={(event) => gradeFromButton('fuzzy', event.currentTarget)}
+        >
           {GRADE_LABELS.fuzzy}
         </button>
-        <button className="g-forgotten" onClick={() => grade('forgotten')}>
+        <button
+          className="g-forgotten"
+          onClick={(event) => gradeFromButton('forgotten', event.currentTarget)}
+        >
           {GRADE_LABELS.forgotten}
         </button>
       </div>

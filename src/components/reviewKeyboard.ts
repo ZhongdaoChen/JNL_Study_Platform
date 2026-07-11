@@ -29,6 +29,10 @@ export function shouldToggleCountdownPause({
   return !isInteractiveShortcutTarget(target);
 }
 
+export function releaseReviewActionFocus(target: { blur: () => void }) {
+  target.blur();
+}
+
 function isInteractiveShortcutTarget(target: EventTarget | null) {
   if (!target) return false;
   const maybeElement = target as ShortcutTarget;
