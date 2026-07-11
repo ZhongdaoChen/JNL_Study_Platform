@@ -7,6 +7,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v1.9.0',
+    date: '2026-07-11',
+    items: [
+      '复习倒计时支持按空格暂停 / 恢复，评分跳到下一个后也可继续用空格控制。',
+      'AI 例句和配图生成新增超时提示，网络或服务异常时不再一直卡在生成中。',
+    ],
+  },
+  {
     version: 'v1.8.0',
     date: '2026-06-23',
     items: [
