@@ -6,6 +6,7 @@ import type { Grade, Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 import { today } from '../lib/date';
 import { toChineseCount } from '../lib/chineseNumerals';
+import { shouldToggleCountdownPause } from './reviewKeyboard';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
 export default function ReviewSession({ childId, lang, spellingOnly, countdownSec, dailyLimit, onChanged }: {
@@ -231,6 +232,25 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     if (countdownSec <= 0) return;
     setIsPaused((v) => !v);
   }
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!shouldToggleCountdownPause({
+        key: event.key,
+        code: event.code,
+        target: event.target,
+        countdownEnabled: countdownSec > 0,
+        hasCurrentWord: Boolean(current),
+      })) {
+        return;
+      }
+      event.preventDefault();
+      setIsPaused((v) => !v);
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [countdownSec, current]);
 
   const unit = lang === 'zh' ? '字' : '单词';
   const modeLabel = spellingOnly ? (lang === 'zh' ? '会写' : '拼写') : '复习';
