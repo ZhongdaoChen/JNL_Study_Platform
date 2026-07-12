@@ -1,3 +1,12 @@
+import type { Grade } from '../lib/types';
+
+const reviewGradeShortcuts: Record<string, Grade> = {
+  KeyA: 'instant',
+  KeyS: 'mastered',
+  KeyD: 'fuzzy',
+  KeyF: 'forgotten',
+};
+
 const interactiveShortcutSelector = [
   'input',
   'textarea',
@@ -27,6 +36,39 @@ export function shouldToggleCountdownPause({
   if (!countdownEnabled || !hasCurrentWord) return false;
   if (code !== 'Space' && key !== ' ') return false;
   return !isInteractiveShortcutTarget(target);
+}
+
+export function reviewGradeFromShortcut({
+  key,
+  code,
+  target,
+  repeat,
+  hasCurrentWord,
+}: {
+  key: string;
+  code: string;
+  target: EventTarget | null;
+  repeat: boolean;
+  hasCurrentWord: boolean;
+}): Grade | null {
+  if (!hasCurrentWord || repeat) return null;
+  if (isInteractiveShortcutTarget(target)) return null;
+
+  const grade = reviewGradeShortcuts[code];
+  if (grade) return grade;
+
+  switch (key.toLowerCase()) {
+    case 'a':
+      return 'instant';
+    case 's':
+      return 'mastered';
+    case 'd':
+      return 'fuzzy';
+    case 'f':
+      return 'forgotten';
+    default:
+      return null;
+  }
 }
 
 export function releaseReviewActionFocus(target: { blur: () => void }) {
