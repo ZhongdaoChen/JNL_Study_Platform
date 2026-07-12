@@ -6,7 +6,7 @@ import type { Grade, Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
 import { today } from '../lib/date';
 import { toChineseCount } from '../lib/chineseNumerals';
-import { releaseReviewActionFocus, shouldToggleCountdownPause } from './reviewKeyboard';
+import { releaseReviewActionFocus, reviewGradeFromShortcut, shouldToggleCountdownPause } from './reviewKeyboard';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
 export default function ReviewSession({ childId, lang, spellingOnly, countdownSec, dailyLimit, onChanged }: {
@@ -240,6 +240,19 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      const shortcutGrade = reviewGradeFromShortcut({
+        key: event.key,
+        code: event.code,
+        target: event.target,
+        repeat: event.repeat,
+        hasCurrentWord: Boolean(current),
+      });
+      if (shortcutGrade) {
+        event.preventDefault();
+        gradeRef.current(shortcutGrade);
+        return;
+      }
+
       if (!shouldToggleCountdownPause({
         key: event.key,
         code: event.code,
@@ -395,25 +408,25 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
           className="g-instant"
           onClick={(event) => gradeFromButton('instant', event.currentTarget)}
         >
-          {instantLabel}
+          A · {instantLabel}
         </button>
         <button
           className="g-mastered"
           onClick={(event) => gradeFromButton('mastered', event.currentTarget)}
         >
-          {GRADE_LABELS.mastered}
+          S · {GRADE_LABELS.mastered}
         </button>
         <button
           className="g-fuzzy"
           onClick={(event) => gradeFromButton('fuzzy', event.currentTarget)}
         >
-          {GRADE_LABELS.fuzzy}
+          D · {GRADE_LABELS.fuzzy}
         </button>
         <button
           className="g-forgotten"
           onClick={(event) => gradeFromButton('forgotten', event.currentTarget)}
         >
-          {GRADE_LABELS.forgotten}
+          F · {GRADE_LABELS.forgotten}
         </button>
       </div>
 
