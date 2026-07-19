@@ -1,7 +1,7 @@
 // 四档复习评分（贴合儿童学习场景）
 export type Grade = 'instant' | 'mastered' | 'fuzzy' | 'forgotten';
 
-// 学习语言：英文单词 / 中文单字。两类分开记录、分开复习。
+// 学习语言：英文 / 中文。两类分开记录、分开复习。
 export type Lang = 'en' | 'zh';
 
 export const LANG_LABELS: Record<Lang, string> = {
@@ -31,12 +31,12 @@ export interface Sentence {
   createdAt: string;
 }
 
-// 去重后的单词，附带 SM-2 记忆状态
+// 去重后的学习条目，附带 SM-2 记忆状态
 export interface Word {
   id: string;
   childId: string;
-  text: string; // 英文：规范化后的小写词；中文：单个汉字
-  // 学习语言。en=英文单词，zh=中文单字。决定拆分方式与复习分组。
+  text: string; // 用户录入并经逗号拆分后的条目，保留大小写与内部空格
+  // 学习语言。en=英文条目，zh=中文条目。决定复习分组。
   lang: Lang;
   // 该词出现过的句子 id（用于复习时展示语境）
   sentenceIds: string[];

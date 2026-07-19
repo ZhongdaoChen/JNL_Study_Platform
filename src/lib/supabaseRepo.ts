@@ -2,7 +2,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Child, ReviewLog, Sentence, Word } from './types';
 import type { Repo } from './repo';
 import { initialSpellingReviewState } from './sm2';
-import { capitalizeWord } from './tokenizer';
 
 const SUPABASE_PAGE_SIZE = 1000;
 
@@ -31,7 +30,7 @@ function rowToWord(r: any): Word {
   return {
     id: r.id,
     childId: r.child_id,
-    text: (r.lang ?? 'en') === 'en' ? capitalizeWord(r.text) : r.text,
+    text: r.text,
     lang: r.lang ?? 'en',
     sentenceIds: r.sentence_ids ?? [],
     firstLearnedAt: r.first_learned_at,
