@@ -5,6 +5,7 @@ import { today } from '../lib/date';
 import type { Lang } from '../lib/types';
 import { LANG_LABELS } from '../lib/types';
 import { tokenizeByLang } from '../lib/tokenizer';
+import { useIOSStandaloneKeyboardFix } from '../hooks/useIOSStandaloneKeyboardFix';
 
 // 模块1：录入今日学习的新内容（英文按词拆分 / 中文按字拆分）
 export default function LearnInput({ childId, onChanged }: { childId: string; onChanged: () => void }) {
@@ -14,6 +15,7 @@ export default function LearnInput({ childId, onChanged }: { childId: string; on
   const [busy, setBusy] = useState(false);
   const [previewWords, setPreviewWords] = useState<string[] | null>(null);
   const [result, setResult] = useState<{ newWords: string[]; reviewedExisting: string[] } | null>(null);
+  const keyboardFixRef = useIOSStandaloneKeyboardFix<HTMLTextAreaElement>();
 
   function resetDraft(clearText = false) {
     setPreviewWords(null);
@@ -92,6 +94,7 @@ export default function LearnInput({ childId, onChanged }: { childId: string; on
       />
 
       <textarea
+        ref={keyboardFixRef}
         value={text}
         onChange={(e) => {
           setText(e.target.value);

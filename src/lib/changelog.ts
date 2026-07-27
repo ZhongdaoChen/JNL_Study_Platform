@@ -7,6 +7,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v1.10.0',
+    date: '2026-07-27',
+    items: [
+      '英文拼复习取消倒计时，孩子可以按自己的节奏完成拼写。',
+      '修复 iPad 添加到桌面后，录入新内容时页面可能跳到最下方的问题。',
+    ],
+  },
+  {
     version: 'v1.9.0',
     date: '2026-07-11',
     items: [

@@ -5,6 +5,7 @@ import { ADMIN_EMAIL } from '../lib/admin';
 import type { Child, Lang } from '../lib/types';
 import { LANG_LABELS } from '../lib/types';
 import { loadUserSettings, saveUserSettings, type ReviewLimits } from '../lib/userSettings';
+import { countdownForReviewMode, REVIEW_MODES, type ReviewMode } from '../lib/reviewMode';
 import LearnInput from './LearnInput';
 import ReviewSession from './ReviewSession';
 import WordList from './WordList';
@@ -14,15 +15,6 @@ import Changelog from './Changelog';
 import AdminPanel from './AdminPanel';
 
 type Tab = 'learn' | 'review' | 'words' | 'stats' | 'settings' | 'admin';
-
-// 复习模式：英文/中文 × 读/拼写。"拼写/会写"模式只复习已达到读熟悉阈值的词。
-type ReviewMode = 'en-read' | 'en-spell' | 'zh-read' | 'zh-write';
-const REVIEW_MODES: { key: ReviewMode; label: string; lang: Lang; spellingOnly: boolean }[] = [
-  { key: 'en-read', label: '英文读', lang: 'en', spellingOnly: false },
-  { key: 'en-spell', label: '英文拼', lang: 'en', spellingOnly: true },
-  { key: 'zh-read', label: '中文读', lang: 'zh', spellingOnly: false },
-  { key: 'zh-write', label: '中文写', lang: 'zh', spellingOnly: true },
-];
 
 // 工作区：登录后（或本地模式）显示的主体。管理孩子档案与三大模块。
 export default function Workspace({ onCompactChange }: { onCompactChange: (compact: boolean) => void }) {
@@ -100,8 +92,8 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
         if (!active || !settings) return;
         applySettings(settings.countdownSec, settings.dailyLimits);
       })
-      .catch((e: any) => {
-        if (active) setError(e.message);
+      .catch((e: unknown) => {
+        if (active) setError(errorMessage(e, '加载配置失败'));
       });
     return () => {
       active = false;
@@ -121,8 +113,8 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
       setChildren((prev) => [...prev, c]);
       setActiveChild(c.id);
       setNewName('');
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e, '新增孩子失败'));
     }
   }
 
@@ -138,8 +130,8 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
     try {
       await saveUserSettings({ countdownSec, dailyLimits });
       setSettingsSaveMsg('配置已提交并落库，之后该用户在任意设备登录都会使用这份最新配置。');
-    } catch (e: any) {
-      setSettingsSaveMsg(`提交配置失败：${e?.message || '请稍后重试'}`);
+    } catch (e: unknown) {
+      setSettingsSaveMsg(`提交配置失败：${errorMessage(e, '请稍后重试')}`);
     } finally {
       setSettingsSaveBusy(false);
     }
@@ -215,7 +207,7 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
                     childId={activeChild}
                     lang={m.lang}
                     spellingOnly={m.spellingOnly}
-                    countdownSec={countdownSec}
+                    countdownSec={countdownForReviewMode(countdownSec, m.key)}
                     dailyLimit={dailyLimits[m.key]}
                     onChanged={bump}
                   />
@@ -261,6 +253,10 @@ export default function Workspace({ onCompactChange }: { onCompactChange: (compa
       )}
     </>
   );
+}
+
+function errorMessage(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback;
 }
 
 function readStoredPositiveInt(key: string): number {
