@@ -70,7 +70,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   }
 
   // 始终持有最新的 grade，供倒计时回调调用（避免把 grade 放进定时器依赖导致重置）
-  const gradeRef = useRef<(g: Grade) => void>(() => {});
+  const gradeRef = useRef<(g: Grade, advance?: boolean) => void>(() => {});
 
   // 切换词或修改配置时重置倒计时
   useEffect(() => {
@@ -80,7 +80,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     setIsPaused(false);
   }, [current?.id, countdownSec]);
 
-  // 倒计时：每个词展示时启动；归零且用户未评分则自动判「彻底陌生」并跳下一个
+  // 倒计时：每个词展示时启动；归零且用户未评分则自动判「彻底陌生」，但停留在当前词不跳转
   useEffect(() => {
     if (!current || countdownSec <= 0 || isPaused || remainRef.current <= 0) return;
     const startRemain = remainRef.current;
@@ -91,7 +91,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         window.clearInterval(id);
         remainRef.current = 0;
         setRemainMs(0);
-        gradeRef.current('forgotten');
+        gradeRef.current('forgotten', false);
       } else {
         remainRef.current = left;
         setRemainMs(left);
@@ -100,8 +100,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     return () => window.clearInterval(id);
   }, [current?.id, countdownSec, isPaused]);
 
-  // 乐观更新：先切到下一张卡，保存放后台执行，失败再提示
-  function grade(g: Grade) {
+  // 乐观更新：默认先切到下一张卡，保存放后台执行，失败再提示；advance=false 时停留在当前词
+  function grade(g: Grade, advance = true) {
     if (!current) return;
     const todayStr = today();
     const isRetryAttempt = spellingOnly
@@ -114,7 +114,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     clearExampleImage();
     setPrefetchedWordId(null);
     setSaveError(null);
-    setIdx((i) => i + 1);
+    if (advance) setIdx((i) => i + 1);
     submitReview(repo, current, g, spellingOnly, isRetryAttempt)
       .then((updated) => {
         setQueue((q) => {

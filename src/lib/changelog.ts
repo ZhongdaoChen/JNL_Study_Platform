@@ -7,6 +7,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v1.11.0',
+    date: '2026-08-20',
+    items: [
+      '复习倒计时归零时仍自动判为「彻底陌生」，但不再自动跳到下一个词，停留在当前词由孩子继续处理。',
+    ],
+  },
+  {
     version: 'v1.10.0',
     date: '2026-07-27',
     items: [
