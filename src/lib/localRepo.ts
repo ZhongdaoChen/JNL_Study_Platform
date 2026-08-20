@@ -75,7 +75,7 @@ export class LocalRepo implements Repo {
         ...w,
         text: w.text,
         lang: w.lang ?? 'en',
-        needsSpelling: w.needsSpelling ?? false,
+        needsSpelling: w.needsSpelling ?? true,
         pendingRetryCount: w.pendingRetryCount ?? 0,
         spellingPendingRetryCount: w.spellingPendingRetryCount ?? 0,
         volatilityRate: w.volatilityRate ?? 0,

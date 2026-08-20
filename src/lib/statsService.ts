@@ -1,6 +1,6 @@
 import type { ReviewLog, Word } from './types';
-import { addDays, today, toDateStr } from './date';
-import { READ_FAMILIAR_THRESHOLD } from './sm2';
+import { addDays, today, toDateStr } from './date.ts';
+import { READ_FAMILIAR_THRESHOLD } from './sm2.ts';
 
 // 把任意时间戳（ISO 或 YYYY-MM-DD）归一化成日期字符串
 function dayOf(ts: string): string {

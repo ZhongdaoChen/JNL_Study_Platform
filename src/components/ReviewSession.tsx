@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { repo } from '../lib/db';
-import { getDueReviews, submitReview } from '../lib/wordService';
+import { archiveWordFromSpelling, getDueReviews, submitReview } from '../lib/wordService';
 import { generateExampleImage, generateExampleSentence } from '../lib/ai';
 import type { Grade, Lang, Word } from '../lib/types';
 import { GRADE_LABELS } from '../lib/types';
@@ -209,18 +209,40 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     setShowExample(true);
   }
 
-  // 删除当前复习的词：从队列移除并跳到下一个
+  // 删除当前复习的词：从队列移除并跳到下一个。
+  // - 拼写/会写模式（spellingOnly）为「归档式删除」：单词和复习记录保留，
+  //   标记为不再需要拼写、读熟练度回落到 2、到期日推迟约一个月；
+  // - 读模式仍是真删除：从数据库移除，不可恢复。
   async function deleteCurrent() {
     if (!current) return;
-    if (!confirm(`确定删除「${current.text}」吗？此操作不可恢复。`)) return;
     const target = current;
-    await repo.deleteWord(target.id);
+    if (spellingOnly) {
+      const spellModeName = lang === 'zh' ? '会写' : '拼写';
+      if (!confirm(
+        `确定删除「${target.text}」吗？删除后它会移出${spellModeName}队列，约一个月内不再安排复习，词本身会保留。`,
+      )) return;
+      try {
+        await archiveWordFromSpelling(repo, target);
+      } catch (e: unknown) {
+        setSaveError(`「${target.text}」删除失败：${errorMessage(e, '请检查网络')}`);
+        return;
+      }
+    } else {
+      if (!confirm(`确定删除「${target.text}」吗？此操作不可恢复。`)) return;
+      try {
+        await repo.deleteWord(target.id);
+      } catch (e: unknown) {
+        setSaveError(`「${target.text}」删除失败：${errorMessage(e, '请检查网络')}`);
+        return;
+      }
+    }
     setQueue((q) => q.filter((w) => w.id !== target.id));
     setShowExample(false);
     setGenError(null);
     exampleRequestRef.current += 1;
     clearExampleImage();
     setPrefetchedWordId(null);
+    setSaveError(null);
     onChanged();
   }
 
@@ -320,8 +342,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         <button
           className="review-icon-btn review-del-btn"
           onClick={deleteCurrent}
-          title={`删除该${unit}`}
-          aria-label={`删除该${unit}`}
+          title={spellingOnly ? `移出${modeLabel}队列（词会保留）` : `删除该${unit}`}
+          aria-label={spellingOnly ? `移出${modeLabel}队列（词会保留）` : `删除该${unit}`}
         >
           🗑
         </button>

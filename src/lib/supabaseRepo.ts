@@ -34,7 +34,7 @@ function rowToWord(r: any): Word {
     lang: r.lang ?? 'en',
     sentenceIds: r.sentence_ids ?? [],
     firstLearnedAt: r.first_learned_at,
-    needsSpelling: r.needs_spelling ?? false,
+    needsSpelling: r.needs_spelling ?? true,
     exampleSentence: r.example_sentence ?? null,
     interval: r.interval,
     ef: r.ef,

@@ -1,14 +1,15 @@
 import type { Grade, Lang, Sentence, Word } from './types';
 import type { Repo } from './repo';
-import { tokenizeByLang } from './tokenizer';
-import { computeVolatilityRate } from './statsService';
+// 运行时导入带 .ts 扩展名：Vite 构建支持，node --test 直跑本模块时也必须显式扩展名
+import { tokenizeByLang } from './tokenizer.ts';
+import { computeVolatilityRate } from './statsService.ts';
 import {
   applyReview,
   initialReviewState,
   initialSpellingReviewState,
   READ_FAMILIAR_THRESHOLD,
-} from './sm2';
-import { addDays, dateLte, today } from './date';
+} from './sm2.ts';
+import { addDays, dateLte, today } from './date.ts';
 
 // 业务服务层：把"拆词 + SM-2 + 仓储"组合成模块要用的高层操作。
 
@@ -49,7 +50,7 @@ export async function addLearning(
         lang,
         sentenceIds: [sentence.id],
         firstLearnedAt: learnedOn,
-        needsSpelling: false,
+        needsSpelling: true,
         exampleSentence: null,
         volatilityRate: 0,
         ...initialReviewState(learnedOn),
@@ -81,6 +82,8 @@ export async function getDueReviews(
   const t = today();
   const due = words
     .filter((w) => w.lang === lang)
+    // 拼写/会写队列要求「需要拼写」：在拼写界面点删除会置为 false 移出队列
+    .filter((w) => !spellingOnly || w.needsSpelling)
     .filter((w) => !spellingOnly || w.repetitions >= READ_FAMILIAR_THRESHOLD)
     .filter((w) => dateLte(spellingOnly ? w.spellingDueDate : w.dueDate, t))
     .sort((a, b) => compareDueThenText(a, b, spellingOnly));
@@ -308,6 +311,24 @@ export async function submitReview(
     repo.upsertWord(updated),
     repo.addReviewLog(nextLog),
   ]);
+  return updated;
+}
+
+// 拼写/会写复习页「删除」= 归档（软删除）：不删数据，只把这个词移出复习安排。
+//  - needsSpelling 置 false：拼写选词会过滤掉它；
+//  - 读 repetitions 回落到 2：跌破「已熟悉读」阈值，也顺带退出拼写资格；
+//  - 读到期日推迟约一个月：这期间读、拼队列都不会再排到它。
+// 暂缓期过后它会重新进入读复习；再次读到熟悉阈值时，needsSpelling 会按既有规则自动恢复为 true。
+export const ARCHIVE_SHELVE_DAYS = 30; // 归档后的暂缓天数（约一个月）
+
+export async function archiveWordFromSpelling(repo: Repo, word: Word): Promise<Word> {
+  const updated: Word = {
+    ...word,
+    needsSpelling: false,
+    repetitions: 2,
+    dueDate: addDays(today(), ARCHIVE_SHELVE_DAYS),
+  };
+  await repo.upsertWord(updated);
   return updated;
 }
 

@@ -42,7 +42,8 @@ export interface Word {
   sentenceIds: string[];
   firstLearnedAt: string;
 
-  // 是否需要"拼写/会写"练习。勾选后该词会出现在「英文拼 / 中文写」复习里。
+  // 是否需要"拼写/会写"练习，默认 true。拼写选词要求该值为 true；
+  // 在「英文拼 / 中文写」复习页点删除会置为 false，把词移出拼写队列（词本身保留）。
   needsSpelling: boolean;
 
   // AI 生成的例句（小学以内词汇）。生成后落库，复习时固定展示，

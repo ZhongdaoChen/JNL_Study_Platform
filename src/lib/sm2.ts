@@ -1,5 +1,5 @@
 import type { Grade, Word } from './types';
-import { addDays, today } from './date';
+import { addDays, today } from './date.ts';
 
 // ============================================================
 // 儿童版 SM-2 间隔重复算法

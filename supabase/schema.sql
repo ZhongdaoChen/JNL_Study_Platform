@@ -33,7 +33,7 @@ create table if not exists words (
   sentence_ids uuid[] not null default '{}',
   first_learned_at timestamptz not null default now(),
   example_sentence text,
-  needs_spelling boolean not null default false,
+  needs_spelling boolean not null default true,
   interval int not null default 1,
   ef real not null default 2.5,
   repetitions real not null default 0,
@@ -55,7 +55,7 @@ create table if not exists words (
 -- 兼容旧库：若 words 表已存在但缺少这些列，补上（安全幂等）
 alter table words add column if not exists example_sentence text;
 alter table words add column if not exists lang text not null default 'en';
-alter table words add column if not exists needs_spelling boolean not null default false;
+alter table words add column if not exists needs_spelling boolean not null default true;
 alter table words add column if not exists spelling_interval int not null default 0;
 alter table words add column if not exists spelling_ef real not null default 2.5;
 alter table words add column if not exists spelling_repetitions real not null default 0;
@@ -67,6 +67,12 @@ alter table words add column if not exists volatility_rate int not null default 
 alter table words add column if not exists spelling_pending_retry_count int not null default 0;
 alter table words alter column repetitions type real using repetitions::real;
 alter table words alter column spelling_repetitions type real using spelling_repetitions::real;
+
+-- needs_spelling 语义调整为「默认需要拼写，拼写复习页删除才置 false」。
+-- 已有列的默认值同步改 true；并回填「读已熟悉但标记为 false」的历史数据，
+-- 只按 repetitions>=4 回填，归档词（repetitions=2）不会被复活，可安全重复执行。
+alter table words alter column needs_spelling set default true;
+update words set needs_spelling = true where needs_spelling = false and repetitions >= 4;
 
 -- 复习日志
 create table if not exists review_logs (
@@ -415,7 +421,8 @@ begin
           ),
           first_learned_at = least(existing_word.first_learned_at, src_word.first_learned_at),
           example_sentence = coalesce(existing_word.example_sentence, src_word.example_sentence),
-          needs_spelling = existing_word.needs_spelling or src_word.needs_spelling,
+          -- needs_spelling 是「排除」标记（false=拼写复习页删除过）：任一方删除过即保持排除
+          needs_spelling = existing_word.needs_spelling and src_word.needs_spelling,
           interval = greatest(existing_word.interval, src_word.interval),
           ef = greatest(existing_word.ef, src_word.ef),
           repetitions = greatest(existing_word.repetitions, src_word.repetitions),
