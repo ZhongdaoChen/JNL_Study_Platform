@@ -367,7 +367,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         </button>
 
         <div className="word-card">
-          <div className="big-word">{current.text}</div>
+          {/* 英文读/英文拼的单词放大 50%，中文读/中文写保持原尺寸 */}
+          <div className={lang === 'en' ? 'big-word big-word-en' : 'big-word'}>{current.text}</div>
 
           {showExample ? (
             <div className="example-area">

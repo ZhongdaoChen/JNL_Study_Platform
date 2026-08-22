@@ -212,6 +212,8 @@ button {
   font-weight: 700;
   letter-spacing: 1px;
 }
+/* 英文读 / 英文拼：单词在 44px 基础上加大 50% */
+.big-word-en { font-size: 66px; }
 .context {
   margin-top: 12px;
   font-size: 18px;
