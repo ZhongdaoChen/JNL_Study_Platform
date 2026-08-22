@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { repo } from '../lib/db';
+import { countdownSecForWord } from '../lib/reviewCountdown';
 import { applyReviewToQueue } from '../lib/reviewQueue';
 import { archiveWordFromSpelling, getDueReviews, submitReview } from '../lib/wordService';
 import { generateExampleImage, generateExampleSentence } from '../lib/ai';
@@ -73,10 +74,10 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   // 始终持有最新的 grade，供倒计时回调调用（避免把 grade 放进定时器依赖导致重置）
   const gradeRef = useRef<(g: Grade, advance?: boolean) => void>(() => {});
 
-  // 切换词或修改配置时重置倒计时
+  // 切换词或修改配置时重置倒计时。词组（>=3 词）按翻倍后的时长计算。
   useEffect(() => {
-    const totalMs = countdownSec * 1000;
-    remainRef.current = current && countdownSec > 0 ? totalMs : 0;
+    const sec = current ? countdownSecForWord(countdownSec, current.text) : countdownSec;
+    remainRef.current = current && sec > 0 ? sec * 1000 : 0;
     setRemainMs(remainRef.current);
     setIsPaused(false);
   }, [current?.id, countdownSec]);
@@ -295,6 +296,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
 
   const unit = lang === 'zh' ? '字' : '单词';
   const modeLabel = spellingOnly ? (lang === 'zh' ? '会写' : '拼写') : '复习';
+  // 当前词实际倒计时：三个单词及以上的词组翻倍（见 reviewCountdown.ts）
+  const activeCountdownSec = current ? countdownSecForWord(countdownSec, current.text) : countdownSec;
 
   if (loading) return <div className="card"><p>加载中…</p></div>;
 
@@ -411,7 +414,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
       </div>
 
       {countdownSec > 0 && (() => {
-        const pct = Math.max(0, Math.min(100, (remainMs / (countdownSec * 1000)) * 100));
+        const pct = Math.max(0, Math.min(100, (remainMs / (activeCountdownSec * 1000)) * 100));
         const hue = (pct / 100) * 120; // 120=绿(时间多) → 0=红(快超时)
         return (
           <div

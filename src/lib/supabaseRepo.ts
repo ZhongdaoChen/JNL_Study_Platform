@@ -1,9 +1,18 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Child, ReviewLog, Sentence, Word } from './types';
 import type { Repo } from './repo';
-import { initialSpellingReviewState } from './sm2';
+// 运行时导入带 .ts 扩展名：Vite 构建支持，node --test 直跑本模块时也必须显式扩展名
+import { initialSpellingReviewState } from './sm2.ts';
 
 const SUPABASE_PAGE_SIZE = 1000;
+
+// 分页查询链的结构类型：只声明 selectAllRows 用到的方法
+// （eq / order 返回同类型构建器，range 返回 Promise）
+interface PagedSelect {
+  eq(column: string, value: unknown): PagedSelect;
+  order(column: string, options?: { ascending?: boolean }): PagedSelect;
+  range(from: number, to: number): PromiseLike<{ data: Record<string, unknown>[] | null; error: unknown }>;
+}
 
 // Supabase 实现：数据存云端 Postgres，RLS 自动按登录用户隔离。
 // UI 通过 Repo 接口调用，与 LocalRepo 完全可互换。
@@ -58,13 +67,39 @@ export class SupabaseRepo implements Repo {
     throw new Error(`${ctx}: ${(error as any)?.message ?? error}`);
   }
 
+  // Supabase（PostgREST）单次 select 默认最多返回 1000 行，超出会被静默截断
+  // （统计页「累计单词」卡在 1000、复习队列漏词都是这个原因）。
+  // 所有「全量读取」查询统一用 range() 分页，直到取回不足一整页为止。
+  // 注意：调用方必须给查询带上稳定排序，否则分页过程中可能漏行或重复。
+  //
+  // PagedSelect：分页查询链的轻量结构类型。Supabase 官方查询构建器的泛型
+  // 很复杂且未接入生成的库类型，这里只声明用到的方法，避免引入更多 any。
+  private async selectAllRows(
+    table: string,
+    ctx: string,
+    applyFilters: (query: PagedSelect) => PagedSelect,
+  ): Promise<Record<string, unknown>[]> {
+    const rows: Record<string, unknown>[] = [];
+    let from = 0;
+    while (true) {
+      // 经 unknown 断言：直接断言会触发 supabase 查询构建器的深度泛型递归
+      const { data, error } = await applyFilters(
+        this.sb.from(table).select('*') as unknown as PagedSelect,
+      ).range(from, from + SUPABASE_PAGE_SIZE - 1);
+      if (error) this.fail(ctx, error);
+      const page = data ?? [];
+      rows.push(...page);
+      if (page.length < SUPABASE_PAGE_SIZE) break;
+      from += SUPABASE_PAGE_SIZE;
+    }
+    return rows;
+  }
+
   async listChildren(): Promise<Child[]> {
-    const { data, error } = await this.sb
-      .from('children')
-      .select('*')
-      .order('created_at');
-    if (error) this.fail('listChildren', error);
-    return (data ?? []).map(rowToChild);
+    const rows = await this.selectAllRows('children', 'listChildren', (q) =>
+      q.order('created_at'),
+    );
+    return rows.map(rowToChild);
   }
 
   async addChild(name: string): Promise<Child> {
@@ -89,21 +124,17 @@ export class SupabaseRepo implements Repo {
   }
 
   async getSentences(childId: string): Promise<Sentence[]> {
-    const { data, error } = await this.sb
-      .from('sentences')
-      .select('*')
-      .eq('child_id', childId);
-    if (error) this.fail('getSentences', error);
-    return (data ?? []).map(rowToSentence);
+    const rows = await this.selectAllRows('sentences', 'getSentences', (q) =>
+      q.eq('child_id', childId).order('created_at').order('id'),
+    );
+    return rows.map(rowToSentence);
   }
 
   async getWords(childId: string): Promise<Word[]> {
-    const { data, error } = await this.sb
-      .from('words')
-      .select('*')
-      .eq('child_id', childId);
-    if (error) this.fail('getWords', error);
-    return (data ?? []).map(rowToWord);
+    const rows = await this.selectAllRows('words', 'getWords', (q) =>
+      q.eq('child_id', childId).order('id'),
+    );
+    return rows.map(rowToWord);
   }
 
   async upsertWord(word: Word): Promise<void> {
@@ -159,25 +190,13 @@ export class SupabaseRepo implements Repo {
   }
 
   async getReviewLogs(childId: string, wordId?: string): Promise<ReviewLog[]> {
-    const rows: any[] = [];
-    let from = 0;
-
-    while (true) {
-      let query = this.sb
-        .from('review_logs')
-        .select('*')
+    const rows = await this.selectAllRows('review_logs', 'getReviewLogs', (q) => {
+      const filtered = q
         .eq('child_id', childId)
         .order('reviewed_at', { ascending: true })
         .order('id', { ascending: true });
-      if (wordId) query = query.eq('word_id', wordId);
-      const { data, error } = await query.range(from, from + SUPABASE_PAGE_SIZE - 1);
-      if (error) this.fail('getReviewLogs', error);
-
-      const page = data ?? [];
-      rows.push(...page);
-      if (page.length < SUPABASE_PAGE_SIZE) break;
-      from += SUPABASE_PAGE_SIZE;
-    }
+      return wordId ? filtered.eq('word_id', wordId) : filtered;
+    });
 
     return rows.map((r: any) => ({
       id: r.id,

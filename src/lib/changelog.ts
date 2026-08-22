@@ -7,6 +7,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v1.13.0',
+    date: '2026-08-22',
+    items: [
+      '复习倒计时：三个单词及以上的词组翻倍计时（如配置 10 秒，词组给 20 秒）。',
+      '修复云端单词超过 1000 个时，统计、总览和复习队列只读取前 1000 个的问题（「累计单词」现在显示真实数量）。',
+    ],
+  },
+  {
     version: 'v1.12.0',
     date: '2026-08-22',
     items: [
