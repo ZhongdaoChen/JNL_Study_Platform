@@ -7,6 +7,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v1.14.0',
+    date: '2026-08-22',
+    items: [
+      '复习触发每日上限时，为从未复习过的新词预留 10% 名额（从逾期词份额中划出），新词的第一次复习不再被积压无限推迟。',
+    ],
+  },
+  {
     version: 'v1.13.0',
     date: '2026-08-22',
     items: [

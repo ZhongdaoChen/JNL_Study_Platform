@@ -125,3 +125,67 @@ test('new words default to needsSpelling=true', async () => {
   assert.deepEqual(newWords, ['cat', 'dog']);
   assert.ok(repo.words.every((w) => w.needsSpelling === true));
 });
+
+// 30 个逾期 10 天、已复习过的积压词
+function makeBacklog(count: number): Word[] {
+  return Array.from({ length: count }, (_, i) =>
+    makeWord({
+      id: `backlog-${i}`,
+      text: `backlog-${String(i).padStart(2, '0')}`,
+      repetitions: 1,
+      lastGrade: 'mastered',
+      dueDate: addDays(today(), -10),
+    }),
+  );
+}
+
+test('never-reviewed new word is reserved even when buried in overdue backlog', async () => {
+  const repo = new FakeRepo();
+  const buried = makeWord({ id: 'buried-new', text: 'buriednew', dueDate: addDays(today(), -5) });
+  repo.words = [...makeBacklog(30), buried];
+  // 旧逻辑下它排在 30 个更早到期的积压词之后，10 个名额轮不到它
+  const queue = await getDueReviews(repo, 'child-1', 'en', false, 10);
+  assert.equal(queue.length, 10);
+  assert.ok(queue.some((w) => w.id === 'buried-new'));
+});
+
+test('without new words the cap still picks the most overdue words first', async () => {
+  const repo = new FakeRepo();
+  repo.words = makeBacklog(30);
+  const queue = await getDueReviews(repo, 'child-1', 'en', false, 10);
+  assert.equal(queue.length, 10);
+  assert.ok(queue.every((w) => w.id.startsWith('backlog-')));
+});
+
+test('recently forgotten words (repetitions=0 but graded) do not take the new-word slot', async () => {
+  const repo = new FakeRepo();
+  const fresh = makeWord({ id: 'fresh-new', text: 'freshnew', dueDate: addDays(today(), -5) });
+  const forgotten = makeWord({
+    id: 'just-forgotten',
+    text: 'justforgotten',
+    repetitions: 0,
+    lastGrade: 'forgotten',
+    dueDate: addDays(today(), -5),
+  });
+  repo.words = [...makeBacklog(30), fresh, forgotten];
+  const queue = await getDueReviews(repo, 'child-1', 'en', false, 10);
+  assert.equal(queue.length, 10);
+  // 新词保底名额只给「从未评过分」的词；刚彻底陌生的词走不稳定/逾期桶，不占新词名额
+  assert.ok(queue.some((w) => w.id === 'fresh-new'));
+  assert.ok(!queue.some((w) => w.id === 'just-forgotten'));
+});
+
+test('spelling queue is unaffected by the new-word reservation', async () => {
+  const repo = new FakeRepo();
+  repo.words = Array.from({ length: 15 }, (_, i) =>
+    makeWord({
+      id: `spell-${i}`,
+      text: `spell-${i}`,
+      repetitions: 4, // 拼写队列门槛
+      lastGrade: 'mastered',
+      spellingDueDate: today(),
+    }),
+  );
+  const queue = await getDueReviews(repo, 'child-1', 'en', true, 10);
+  assert.equal(queue.length, 10);
+});

@@ -67,8 +67,9 @@ export async function addLearning(
 
 // 模块2：今日复习清单
 // 取出指定语言中所有到期（dueDate <= 今天）的词。
-// 默认按到期日升序、同日按字母/字序（稳定）；英文读触发每日上限时，先保底选择已过期 3 天的词，
-// 再优先挑波动率高的到期词。
+// 默认按到期日升序、同日按字母/字序（稳定）；触发每日上限时按配额选词：
+// 从未复习的新词 10%（保底，避免第一次复习被积压淹没）、逾期超 3 天 40%（逾期最久优先）、
+// 不稳定 30%（波动率高优先）、普通 20%；各桶不足时剩余名额按该顺序补齐。
 // 进度记忆：每次评分会立即更新该词的 dueDate（推到未来），评过的词即退出到期池，
 // 因此下次重新进入复习页时只返回尚未复习的词，自动从上次进度继续。
 export async function getDueReviews(
@@ -109,18 +110,27 @@ function selectDueReviews(
   const selected: Word[] = [];
   const selectedIds = new Set<string>();
 
+  // 从未复习的新词单独保底：否则积压一大时，新词第一次复习（最容易忘的一次）
+  // 会被逾期桶的长队无限推迟。拼写队列里的词读熟练度都 >= 4，此桶自然为空。
+  const neverReviewed = due
+    .filter((w) => isNeverReviewed(w))
+    .sort((a, b) => compareDueThenText(a, b, spellingOnly));
   const severeOverdue = due
+    .filter((w) => !isNeverReviewed(w))
     .filter((w) => dateLte(dueDateForMode(w, spellingOnly), severeCutoff))
     .sort((a, b) => compareDueThenText(a, b, spellingOnly));
   const unstable = due
+    .filter((w) => !isNeverReviewed(w))
     .filter((w) => !dateLte(dueDateForMode(w, spellingOnly), severeCutoff))
     .filter((w) => isUnstable(w, spellingOnly))
     .sort((a, b) => compareUnstable(a, b, spellingOnly));
   const normal = due
+    .filter((w) => !isNeverReviewed(w))
     .filter((w) => !dateLte(dueDateForMode(w, spellingOnly), severeCutoff))
     .filter((w) => !isUnstable(w, spellingOnly))
     .sort((a, b) => compareDueThenText(a, b, spellingOnly));
 
+  takeUnique(selected, neverReviewed, quotas.neverReviewed, selectedIds);
   takeUnique(selected, severeOverdue, quotas.severeOverdue, selectedIds);
   takeUnique(selected, unstable, quotas.unstable, selectedIds);
   takeUnique(selected, normal, quotas.normal, selectedIds);
@@ -128,7 +138,7 @@ function selectDueReviews(
   if (selected.length < maxCount) {
     takeUnique(
       selected,
-      [...severeOverdue, ...unstable, ...normal],
+      [...neverReviewed, ...severeOverdue, ...unstable, ...normal],
       maxCount - selected.length,
       selectedIds,
     );
@@ -137,18 +147,33 @@ function selectDueReviews(
   return selected;
 }
 
-function reviewQuotas(maxCount: number): { severeOverdue: number; unstable: number; normal: number } {
+// 「从未复习」= 读熟练度为 0 且从未评过分。注意刚被判「彻底陌生」的词
+// repetitions 也会归零，但那些词 lastGrade 非空，会走不稳定桶的优先逻辑。
+function isNeverReviewed(word: Word): boolean {
+  return word.repetitions === 0 && word.lastGrade === null;
+}
+
+function reviewQuotas(maxCount: number): {
+  neverReviewed: number;
+  severeOverdue: number;
+  unstable: number;
+  normal: number;
+} {
   const weighted = [
-    { key: 'severeOverdue' as const, weight: 0.5, value: maxCount * 0.5 },
+    { key: 'neverReviewed' as const, weight: 0.1, value: maxCount * 0.1 },
+    // 逾期桶从 50% 让出 10% 给新词保底
+    { key: 'severeOverdue' as const, weight: 0.4, value: maxCount * 0.4 },
     { key: 'unstable' as const, weight: 0.3, value: maxCount * 0.3 },
     { key: 'normal' as const, weight: 0.2, value: maxCount * 0.2 },
   ];
   const quotas = {
-    severeOverdue: Math.floor(weighted[0].value),
-    unstable: Math.floor(weighted[1].value),
-    normal: Math.floor(weighted[2].value),
+    neverReviewed: Math.floor(weighted[0].value),
+    severeOverdue: Math.floor(weighted[1].value),
+    unstable: Math.floor(weighted[2].value),
+    normal: Math.floor(weighted[3].value),
   };
-  let remaining = maxCount - quotas.severeOverdue - quotas.unstable - quotas.normal;
+  let remaining =
+    maxCount - quotas.neverReviewed - quotas.severeOverdue - quotas.unstable - quotas.normal;
   weighted
     .sort((a, b) => {
       const fractionDiff = (b.value - Math.floor(b.value)) - (a.value - Math.floor(a.value));
