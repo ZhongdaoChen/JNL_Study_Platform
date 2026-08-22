@@ -7,6 +7,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v1.12.0',
+    date: '2026-08-22',
+    items: [
+      '「彻底陌生」的当天补做不再全部堆在队列末尾：第一遍补做推迟到约 10 个词之后，其余补做仍在队列末尾。',
+    ],
+  },
+  {
     version: 'v1.11.0',
     date: '2026-08-20',
     items: [

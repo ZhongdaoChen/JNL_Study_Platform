@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { repo } from '../lib/db';
+import { applyReviewToQueue } from '../lib/reviewQueue';
 import { archiveWordFromSpelling, getDueReviews, submitReview } from '../lib/wordService';
 import { generateExampleImage, generateExampleSentence } from '../lib/ai';
 import type { Grade, Lang, Word } from '../lib/types';
@@ -117,13 +118,13 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     if (advance) setIdx((i) => i + 1);
     submitReview(repo, current, g, spellingOnly, isRetryAttempt)
       .then((updated) => {
-        setQueue((q) => {
-          const next = q.map((w) => (w.id === updated.id ? updated : w));
-          const pendingRetryCount = spellingOnly
-            ? updated.spellingPendingRetryCount
-            : updated.pendingRetryCount;
-          return pendingRetryCount > 0 ? [...next, updated] : next;
-        });
+        // 补做排队规则见 reviewQueue.ts：首次彻底陌生的补做插到约 10 个词后，
+        // 补做时再评分则把剩余补做追加到队尾
+        setQueue((q) => applyReviewToQueue(q, updated, {
+          spellingOnly,
+          isRetryAttempt,
+          gradedIndex: q.findIndex((w) => w.id === updated.id),
+        }));
         onChanged();
       })
       .catch((e: unknown) => {
