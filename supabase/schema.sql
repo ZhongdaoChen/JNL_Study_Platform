@@ -236,7 +236,8 @@ begin
       ip_limit := 90;
       principal_concurrency := 2;
       ip_concurrency := 6;
-      lease_seconds := 30;
+      -- 评估上游预算默认 35 秒，租约必须留出安全余量。
+      lease_seconds := 60;
     when 'examples' then
       endpoint_name := 'examples';
       window_seconds := 60;

@@ -47,7 +47,7 @@ npm run dev
 1. 在 supabase.com 新建项目。
 2. 在 SQL Editor 执行 `supabase/schema.sql`（升级后需重跑，幂等不丢数据），创建 `children / sentences / words / review_logs / feedback / user_settings`、语音请求限流表，以及管理员、数据共享、语音限流 RPC。已上线旧库必须先重跑 schema，再部署新版 Serverless 函数；否则发音接口会按设计关闭并返回 503。语音限流 RPC 只授予 `service_role`，`public / anon / authenticated` 均无执行权限。
 3. 复制 `.env.example` 为 `.env.local`，填入 `VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`，并只在服务端环境配置 `SUPABASE_SERVICE_ROLE_KEY` 和 `QWEN_API_KEY`（两者都绝不能加 `VITE_` 前缀）。浏览器 bearer token 只用于向 Supabase Auth 验证身份；验证成功后，Serverless 才会用 service-role key 和已验证的用户 ID 调用限流 RPC。缺少 service-role key 时发音接口会失败关闭并返回 503。
-4. 如需覆盖 TTS 音色，可选填 `QWEN_TTS_VOICE`。发音评估模型固定为 `qwen3.5-omni-flash`，TTS 模型固定为 `qwen3-tts-instruct-flash`，避免部署配置与安全策略漂移。`PRONUNCIATION_RATE_LIMIT_SECRET` 可单独设置 IP 指纹密钥；`PRONUNCIATION_SECURITY_TIMEOUT_MS` 和 `PRONUNCIATION_UPSTREAM_TIMEOUT_MS` 可调整服务端超时。每类操作的用户/IP频率、并发、30 秒租约以及 synthesis 的账户级 `dashscope-tts` 滚动限制（3 次/秒、180 次/分钟）均硬编码在 SQL，调用方不能覆盖。上游 deadline 按 RPC 返回的实际剩余租约计算并预留安全余量。
+4. 如需覆盖 TTS 音色，可选填 `QWEN_TTS_VOICE`。发音评估模型固定为 `qwen3.5-omni-flash`，TTS 模型固定为 `qwen3-tts-instruct-flash`，避免部署配置与安全策略漂移。`PRONUNCIATION_RATE_LIMIT_SECRET` 可单独设置 IP 指纹密钥；`PRONUNCIATION_SECURITY_TIMEOUT_MS` 和 `PRONUNCIATION_UPSTREAM_TIMEOUT_MS` 可调整服务端超时。每类操作的用户/IP频率、并发、租约（评估 60 秒、其余 30 秒）以及 synthesis 的账户级 `dashscope-tts` 滚动限制（3 次/秒、180 次/分钟）均硬编码在 SQL，调用方不能覆盖。上游 deadline 按 RPC 返回的实际剩余租约计算并预留安全余量；预算梯度为租约 60 秒 > 上游默认 35 秒 > 前端总超时 45 秒。评估录音在前端统一降采样为 16 kHz 单声道 WAV，函数区域固定 `sin1`（新加坡），缩短浏览器→函数→DashScope 两段上传耗时。
 5. 配好 env 后 `db.ts` 自动切换为云端同步。
 
 ## 部署

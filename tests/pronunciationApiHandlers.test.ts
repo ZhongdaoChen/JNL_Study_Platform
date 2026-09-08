@@ -57,10 +57,14 @@ test('Vercel pronunciation functions keep runtime imports inside the api directo
 test('Vercel includes TypeScript API helpers in serverless function bundles', () => {
   const config = JSON.parse(readFileSync('vercel.json', 'utf8')) as {
     functions?: Record<string, { includeFiles?: string; maxDuration?: number }>;
+    regions?: string[];
   };
 
   assert.equal(config.functions?.['api/*.ts']?.includeFiles, 'api/*.ts');
   assert.ok((config.functions?.['api/*.ts']?.maxDuration ?? 0) >= 60);
+  // 函数必须跑在离 DashScope（北京）和用户都近的新加坡区域，
+  // 默认美东会让音频上传和上游调用横跨太平洋，频繁撞超时。
+  assert.deepEqual(config.regions, ['sin1']);
 });
 
 test('api functions import local modules with .js specifiers so Vercel builds resolve them', () => {
@@ -173,7 +177,7 @@ async function withServerEnvironment(
         allowed: true,
         lease_id: '11111111-1111-4111-8111-111111111111',
         granted_at: new Date(grantedAt).toISOString(),
-        expires_at: new Date(grantedAt + 30_000).toISOString(),
+        expires_at: new Date(grantedAt + 60_000).toISOString(),
         retry_after_seconds: 0,
       });
     }

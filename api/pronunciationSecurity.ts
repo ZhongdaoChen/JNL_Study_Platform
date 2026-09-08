@@ -276,7 +276,7 @@ function readSecurityConfig(): SecurityConfig {
     ),
     upstreamTimeoutMs: envInteger(
       'PRONUNCIATION_UPSTREAM_TIMEOUT_MS',
-      20_000,
+      35_000,
       1,
       120_000,
     ),

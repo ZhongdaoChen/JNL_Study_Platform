@@ -3,6 +3,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
+  "regions": ["sin1"],
   "functions": {
     "api/*.ts": {
       "includeFiles": "api/*.ts",

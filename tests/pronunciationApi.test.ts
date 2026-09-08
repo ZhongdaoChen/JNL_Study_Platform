@@ -23,7 +23,7 @@ function withMockedFetch(implementation: typeof fetch) {
 }
 
 test('assessment timeout allows the two-stage server evaluation to finish', () => {
-  assert.equal(PRONUNCIATION_REQUEST_TIMEOUTS.assessment, 30_000);
+  assert.equal(PRONUNCIATION_REQUEST_TIMEOUTS.assessment, 45_000);
 });
 
 test('assessment sends target, mimeType, and base64 audio', async () => {

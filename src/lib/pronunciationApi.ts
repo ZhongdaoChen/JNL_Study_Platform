@@ -2,7 +2,7 @@ import { sanitizePronunciationExamples } from './pronunciationRules.ts';
 import { supabase, usingCloud } from './supabase.ts';
 
 export const PRONUNCIATION_REQUEST_TIMEOUTS = {
-  assessment: 30_000,
+  assessment: 45_000,
   content: 15_000,
   synthesis: 15_000,
 } as const;

@@ -441,6 +441,10 @@ export function assertMinimumRecordingDuration(durationMs: number): void {
   }
 }
 
+// 16 kHz 单声道是语音模型的标准输入，体积只有 48 kHz 录音的 1/3，
+// 能显著缩短浏览器到函数、函数到 DashScope 两段上传的耗时。
+const SPEECH_SAMPLE_RATE = 16_000;
+
 export async function convertRecordedAudioToWav(blob: Blob): Promise<Blob> {
   const AudioContextConstructor = globalThis.AudioContext
     ?? (globalThis as typeof globalThis & {
@@ -453,10 +457,32 @@ export async function convertRecordedAudioToWav(blob: Blob): Promise<Blob> {
   const audioContext = new AudioContextConstructor();
   try {
     const decoded = await audioContext.decodeAudioData(await blob.arrayBuffer());
-    return encodePcm16Wav(decoded);
+    return encodePcm16Wav(await downsampleToSpeechFormat(decoded));
   } finally {
     await audioContext.close().catch(() => {});
   }
+}
+
+async function downsampleToSpeechFormat(audio: AudioBuffer): Promise<DecodedAudioLike> {
+  if (audio.sampleRate === SPEECH_SAMPLE_RATE && audio.numberOfChannels === 1) {
+    return audio;
+  }
+  const OfflineConstructor = globalThis.OfflineAudioContext
+    ?? (globalThis as typeof globalThis & {
+      webkitOfflineAudioContext?: typeof OfflineAudioContext;
+    }).webkitOfflineAudioContext;
+  if (!OfflineConstructor) return audio;
+
+  const frames = Math.max(
+    1,
+    Math.ceil(audio.length * SPEECH_SAMPLE_RATE / audio.sampleRate),
+  );
+  const offline = new OfflineConstructor(1, frames, SPEECH_SAMPLE_RATE);
+  const source = offline.createBufferSource();
+  source.buffer = audio;
+  source.connect(offline.destination);
+  source.start(0);
+  return offline.startRendering();
 }
 
 export function encodePcm16Wav(audio: DecodedAudioLike): Blob {
