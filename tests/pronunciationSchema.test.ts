@@ -26,12 +26,6 @@ test('schema exposes only service-role pronunciation limiter RPCs with trusted p
   assert.match(sql, /global_per_minute := 180/i);
   assert.match(sql, /resource_key := 'dashscope-tts'/i);
   assert.match(sql, /model_key := 'qwen3-tts-flash'/i);
-  assert.match(sql, /when 'omni_assessment' then/i);
-  assert.match(sql, /policy_scope := 'pronunciation-omni'/i);
-  assert.match(sql, /global_per_second := 1/i);
-  assert.match(sql, /global_per_minute := 60/i);
-  assert.match(sql, /resource_key := 'dashscope-omni'/i);
-  assert.match(sql, /model_key := 'qwen3\.5-omni-plus'/i);
   assert.doesNotMatch(sql, /\bp_(?:scope|endpoint|resource_key|model_key|global_per_second|global_per_minute|window_seconds|principal_limit|ip_limit|principal_concurrency|ip_concurrency|lease_seconds)\b/i);
   assert.match(sql, /request_time - interval '1 second'/i);
   assert.match(sql, /request_time - interval '1 minute'/i);

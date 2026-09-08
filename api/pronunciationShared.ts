@@ -9,14 +9,16 @@ export const DASH_SCOPE_CHAT_COMPLETIONS_URL =
 const HAN_TEXT_RE = /^[\p{Script=Han}\s，。！？、,.!?；;：“”"'（）()]+$/u;
 const HAN_CHARACTER_RE = /\p{Script=Han}/u;
 const AUDIO_FORMAT_BY_MIME_TYPE = new Map([
+  ['audio/webm', 'webm'],
+  ['audio/webm;codecs=opus', 'webm'],
+  ['audio/mp4', 'mp4'],
+  ['audio/ogg', 'ogg'],
+  ['audio/ogg;codecs=opus', 'ogg'],
   ['audio/wav', 'wav'],
 ]);
+const MIN_AUDIO_BYTES = 256;
 const MAX_AUDIO_BYTES = 1_000_000;
 const MAX_AUDIO_BASE64_LENGTH = Math.ceil(MAX_AUDIO_BYTES / 3) * 4;
-const MIN_AUDIO_DURATION_MS = 250;
-const MAX_AUDIO_DURATION_MS = 6_000;
-const MIN_PCM_SAMPLE_RATE = 8_000;
-const MAX_PCM_SAMPLE_RATE = 48_000;
 const MAX_TEXT_CHARACTERS = 40;
 const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
@@ -90,10 +92,12 @@ export function validateAudioRequest(body: unknown): AudioRequest {
   if (audio.length === 0 || audio.toString('base64') !== audioBase64) {
     throw new RequestValidationError('音频数据无效');
   }
+  if (audio.length < MIN_AUDIO_BYTES) {
+    throw new RequestValidationError('音频太短，请重新录音');
+  }
   if (audio.length > MAX_AUDIO_BYTES) {
     throw new RequestValidationError('音频不能超过 1 MB');
   }
-  validatePcmWav(audio);
 
   return { target, mimeType, audioBase64 };
 }
@@ -158,96 +162,4 @@ function requireChineseText(value: unknown, field: string): string {
     );
   }
   return text;
-}
-
-function validatePcmWav(audio: Buffer): void {
-  if (
-    audio.length < 12
-    || readAscii(audio, 0, 4) !== 'RIFF'
-    || readAscii(audio, 8, 12) !== 'WAVE'
-    || audio.readUInt32LE(4) !== audio.length - 8
-  ) {
-    throw new RequestValidationError('WAV 音频数据无效');
-  }
-
-  let format: {
-    audioFormat: number;
-    channelCount: number;
-    sampleRate: number;
-    byteRate: number;
-    blockAlign: number;
-    bitsPerSample: number;
-  } | null = null;
-  let dataBytes: number | null = null;
-  let offset = 12;
-
-  while (offset < audio.length) {
-    if (offset + 8 > audio.length) {
-      throw new RequestValidationError('WAV 音频数据无效');
-    }
-    const chunkId = readAscii(audio, offset, offset + 4);
-    const chunkSize = audio.readUInt32LE(offset + 4);
-    const chunkStart = offset + 8;
-    const chunkEnd = chunkStart + chunkSize;
-    if (chunkEnd > audio.length) {
-      throw new RequestValidationError('WAV 音频数据无效');
-    }
-
-    if (chunkId === 'fmt ') {
-      if (format !== null || chunkSize < 16) {
-        throw new RequestValidationError('WAV 音频数据无效');
-      }
-      format = {
-        audioFormat: audio.readUInt16LE(chunkStart),
-        channelCount: audio.readUInt16LE(chunkStart + 2),
-        sampleRate: audio.readUInt32LE(chunkStart + 4),
-        byteRate: audio.readUInt32LE(chunkStart + 8),
-        blockAlign: audio.readUInt16LE(chunkStart + 12),
-        bitsPerSample: audio.readUInt16LE(chunkStart + 14),
-      };
-    } else if (chunkId === 'data') {
-      if (dataBytes !== null) {
-        throw new RequestValidationError('WAV 音频数据无效');
-      }
-      dataBytes = chunkSize;
-    }
-
-    offset = chunkEnd + (chunkSize % 2);
-    if (offset > audio.length) {
-      throw new RequestValidationError('WAV 音频数据无效');
-    }
-  }
-
-  if (format === null || dataBytes === null) {
-    throw new RequestValidationError('WAV 音频数据无效');
-  }
-
-  const expectedBlockAlign = 2;
-  const expectedByteRate = format.sampleRate * expectedBlockAlign;
-  if (
-    format.audioFormat !== 1
-    || format.channelCount !== 1
-    || format.bitsPerSample !== 16
-    || format.sampleRate < MIN_PCM_SAMPLE_RATE
-    || format.sampleRate > MAX_PCM_SAMPLE_RATE
-    || format.blockAlign !== expectedBlockAlign
-    || format.byteRate !== expectedByteRate
-    || dataBytes % expectedBlockAlign !== 0
-  ) {
-    throw new RequestValidationError(
-      '仅支持单声道 16 位 PCM WAV（8–48 kHz）',
-    );
-  }
-
-  const durationNumerator = dataBytes * 1_000;
-  if (durationNumerator < format.byteRate * MIN_AUDIO_DURATION_MS) {
-    throw new RequestValidationError('音频太短，请至少录音 0.25 秒');
-  }
-  if (durationNumerator > format.byteRate * MAX_AUDIO_DURATION_MS) {
-    throw new RequestValidationError('音频不能超过 6 秒');
-  }
-}
-
-function readAscii(buffer: Buffer, start: number, end: number): string {
-  return buffer.toString('ascii', start, end);
 }
