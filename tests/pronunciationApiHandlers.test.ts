@@ -56,10 +56,34 @@ test('Vercel pronunciation functions keep runtime imports inside the api directo
 
 test('Vercel includes TypeScript API helpers in serverless function bundles', () => {
   const config = JSON.parse(readFileSync('vercel.json', 'utf8')) as {
-    functions?: Record<string, { includeFiles?: string }>;
+    functions?: Record<string, { includeFiles?: string; maxDuration?: number }>;
   };
 
   assert.equal(config.functions?.['api/*.ts']?.includeFiles, 'api/*.ts');
+  assert.ok((config.functions?.['api/*.ts']?.maxDuration ?? 0) >= 60);
+});
+
+test('api functions import local modules with .js specifiers so Vercel builds resolve them', () => {
+  const serverFiles = [
+    'api/assess-pronunciation.ts',
+    'api/generate-pronunciation-examples.ts',
+    'api/synthesize-pronunciation.ts',
+    'api/pronunciationShared.ts',
+    'api/pronunciationSecurity.ts',
+    'api/pronunciationRules.ts',
+  ];
+
+  for (const path of serverFiles) {
+    const source = readFileSync(path, 'utf8');
+    const relativeImports = [...source.matchAll(/from\s+['"](\.[^'"]+)['"]/g)]
+      .map((match) => match[1]);
+    for (const specifier of relativeImports) {
+      assert.ok(
+        specifier.endsWith('.js'),
+        `${path} imports '${specifier}': Vercel compiles each api/*.ts per file, so relative specifiers must end with .js (never .ts), otherwise the deployed function crashes with ERR_MODULE_NOT_FOUND`,
+      );
+    }
+  }
 });
 
 async function invokeHandler(handler: Handler, req: HandlerRequest): Promise<HandlerResult> {

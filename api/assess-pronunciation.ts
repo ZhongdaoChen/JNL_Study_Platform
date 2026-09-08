@@ -10,16 +10,16 @@ import {
   parseJsonObject,
   parseRequestBody,
   validateAudioRequest,
-} from './pronunciationShared.ts';
+} from './pronunciationShared.js';
 import {
   isSingleHanCharacter,
   normalizeRecognizedChinese,
-} from './pronunciationRules.ts';
+} from './pronunciationRules.js';
 import {
   type PronunciationSecurityContext,
   PronunciationTimeoutError,
   withPronunciationSecurity,
-} from './pronunciationSecurity.ts';
+} from './pronunciationSecurity.js';
 
 const ASSESS_MODEL =
   process.env.QWEN_PRONUNCIATION_MODEL ?? 'qwen-audio-3.0-asr-flash';

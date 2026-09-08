@@ -6,12 +6,12 @@ import {
   isRecord,
   parseRequestBody,
   validateSynthesisRequest,
-} from './pronunciationShared.ts';
+} from './pronunciationShared.js';
 import {
   type PronunciationSecurityContext,
   PronunciationTimeoutError,
   withPronunciationSecurity,
-} from './pronunciationSecurity.ts';
+} from './pronunciationSecurity.js';
 
 const TTS_MODEL = 'qwen3-tts-flash';
 const TTS_VOICE = process.env.QWEN_TTS_VOICE ?? 'Cherry';

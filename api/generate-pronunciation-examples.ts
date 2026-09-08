@@ -1,4 +1,4 @@
-import { sanitizePronunciationExamples } from './pronunciationRules.ts';
+import { sanitizePronunciationExamples } from './pronunciationRules.js';
 import {
   DASH_SCOPE_CHAT_COMPLETIONS_URL,
   type ApiRequest,
@@ -9,12 +9,12 @@ import {
   parseJsonObject,
   parseRequestBody,
   validateExampleRequest,
-} from './pronunciationShared.ts';
+} from './pronunciationShared.js';
 import {
   type PronunciationSecurityContext,
   PronunciationTimeoutError,
   withPronunciationSecurity,
-} from './pronunciationSecurity.ts';
+} from './pronunciationSecurity.js';
 
 const EXAMPLES_MODEL = 'qwen-turbo';
 
