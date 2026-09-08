@@ -54,6 +54,14 @@ test('Vercel pronunciation functions keep runtime imports inside the api directo
   }
 });
 
+test('Vercel includes TypeScript API helpers in serverless function bundles', () => {
+  const config = JSON.parse(readFileSync('vercel.json', 'utf8')) as {
+    functions?: Record<string, { includeFiles?: string }>;
+  };
+
+  assert.equal(config.functions?.['api/*.ts']?.includeFiles, 'api/*.ts');
+});
+
 async function invokeHandler(handler: Handler, req: HandlerRequest): Promise<HandlerResult> {
   const result: HandlerResult = { status: 200, body: undefined };
   const res: HandlerResponse = {
