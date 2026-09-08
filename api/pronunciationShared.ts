@@ -52,13 +52,22 @@ export interface SynthesisRequest {
 export class RequestValidationError extends Error {}
 
 export function parseJsonObject(text: string): Record<string, unknown> | null {
-  let value = text.trim();
+  const value = text.trim();
   if (!value) return null;
 
-  const fenced = value.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  if (fenced) value = fenced[1].trim();
-  if (!value) return null;
+  const direct = tryParseJsonObject(value);
+  if (direct) return direct;
 
+  // qwen3.5-omni-flash 实测会在 JSON 结尾多输出一行孤立的 ```（没有开头围栏），
+  // 直接 JSON.parse 必然失败。退回到“第一个 { 到最后一个 }”的子串再解析一次；
+  // 严格性由调用方解析后的字段校验保证。
+  const start = value.indexOf('{');
+  const end = value.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  return tryParseJsonObject(value.slice(start, end + 1));
+}
+
+function tryParseJsonObject(value: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(value);
     return isRecord(parsed) ? parsed : null;

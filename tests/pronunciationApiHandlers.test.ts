@@ -317,6 +317,18 @@ test('parseJsonObject parses plain and fenced JSON objects', () => {
   );
 });
 
+test('parseJsonObject tolerates the lone trailing fence qwen3.5-omni-flash emits', () => {
+  // 实测回归：模型会在合法 JSON 之后追加一行孤立的 ```（没有开头围栏）。
+  assert.deepEqual(
+    parseJsonObject('{"recognizedText":"中","status":"correct"}\n```'),
+    { recognizedText: '中', status: 'correct' },
+  );
+  assert.deepEqual(
+    parseJsonObject('好的：\n{"status":"correct"}\n```\n'),
+    { status: 'correct' },
+  );
+});
+
 test('parseJsonObject rejects empty, invalid, array, and primitive JSON', () => {
   assert.equal(parseJsonObject(''), null);
   assert.equal(parseJsonObject('```json\nnot-json\n```'), null);
@@ -554,6 +566,28 @@ test('multi-character mismatch uses original audio and can pass on a high-confid
       },
     });
     assert.equal(fetchCount, 1);
+  });
+});
+
+test('assessment accepts a judgment followed by a stray trailing fence chunk', async () => {
+  await withServerEnvironment((async () => sseResponse([
+    '{"recognizedText":"中","status":"correct","confidence":1,"acceptedReading":"zhōng"}',
+    '\n```',
+  ])) as typeof fetch, async () => {
+    const result = await invokeHandler(assessPronunciation, {
+      method: 'POST',
+      body: { target: '中', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
+    });
+
+    assert.deepEqual(result, {
+      status: 200,
+      body: {
+        correct: true,
+        recognizedText: '中',
+        acceptedReading: 'zhōng',
+        confidence: 1,
+      },
+    });
   });
 });
 

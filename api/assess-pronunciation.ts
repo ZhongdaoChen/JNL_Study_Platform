@@ -40,6 +40,7 @@ export function pronunciationJudgmentPrompt(target: string): string {
     '第一步：把录音中实际听到的内容如实转写进 recognizedText（只写听到的汉字，没有听清人声就写空字符串）。',
     '第二步：对照目标文本判断录音的内容和发音是否匹配。',
     '只返回一个 JSON 对象，且只能有 recognizedText、status、confidence、acceptedReading 四个字段。',
+    '直接输出 JSON 对象本身，禁止使用 Markdown 代码块、反引号或任何额外文字。',
     'status 只能是 correct、incorrect 或 unclear；confidence 必须是 0 到 1 的数字；recognizedText 必须是字符串。',
     '只有录音清楚且能明确判断时才返回 correct 或 incorrect；噪声、截断、含糊或证据冲突都返回 unclear。',
     'incorrect 只用于原始录音明确读成了目标以外内容的情形，不确定时绝不能猜测。',
@@ -146,6 +147,11 @@ async function handleAuthorizedAssessment(
       ? parsePronunciationJudgment(judgmentText, request.target)
       : null;
     if (!judgment) {
+      // 只记录模型输出样本用于排障，不包含任何密钥或音频数据。
+      console.error('pronunciation judgment rejected', JSON.stringify({
+        sseTextExtracted: judgmentText !== null,
+        sample: (judgmentText ?? judgmentStream ?? '').slice(0, 300),
+      }));
       res.status(502).json({ error: '发音评估结果无效' });
       return;
     }
