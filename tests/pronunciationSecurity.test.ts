@@ -81,6 +81,7 @@ function hangsUntilAborted(
 async function withSecurityEnvironment(
   fetchImplementation: typeof fetch,
   run: () => Promise<void>,
+  serviceRoleKey = 'service-role-key',
 ): Promise<void> {
   const originalFetch = globalThis.fetch;
   const originals = {
@@ -95,7 +96,7 @@ async function withSecurityEnvironment(
   globalThis.fetch = fetchImplementation;
   process.env.SUPABASE_URL = 'https://project.supabase.co';
   process.env.SUPABASE_ANON_KEY = 'anon-key';
-  process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey;
   process.env.PRONUNCIATION_RATE_LIMIT_SECRET = 'rate-limit-secret';
   process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS = '20';
   process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS = '25';
@@ -315,6 +316,57 @@ test('distributed rate-limit denial uses service role and a minimal trusted payl
     assert.match(acquireBody.p_ip_hash, /^[a-f0-9]{64}$/);
     assert.notEqual(acquireBody.p_ip_hash, '203.0.113.9');
   });
+});
+
+test('new Supabase secret keys are sent only through the apikey header', async () => {
+  const rpcHeaders: Record<string, string>[] = [];
+  await withSecurityEnvironment((async (input, init) => {
+    const url = String(input);
+    if (url.endsWith('/auth/v1/user')) {
+      return new Response(JSON.stringify({ id: 'user-1' }), { status: 200 });
+    }
+    if (url.includes('/rest/v1/rpc/')) {
+      rpcHeaders.push(init?.headers as Record<string, string>);
+      return url.endsWith('/acquire_pronunciation_request')
+        ? new Response(JSON.stringify(allowedLease()), { status: 200 })
+        : new Response('null', { status: 200 });
+    }
+    return new Response(null, { status: 404 });
+  }) as typeof fetch, async () => {
+    const { response } = createResponse();
+    await withPronunciationSecurity(request(), response, 'examples', async () => {});
+  }, 'sb_secret_test');
+
+  assert.equal(rpcHeaders.length, 2);
+  for (const headers of rpcHeaders) {
+    assert.equal(headers.apikey, 'sb_secret_test');
+    assert.equal('Authorization' in headers, false);
+  }
+});
+
+test('legacy service role JWT remains available as bearer authentication', async () => {
+  let acquireHeaders: Record<string, string> | undefined;
+  const legacyJwt = 'eyJhbGciOiJIUzI1NiJ9.payload.signature';
+  await withSecurityEnvironment((async (input, init) => {
+    const url = String(input);
+    if (url.endsWith('/auth/v1/user')) {
+      return new Response(JSON.stringify({ id: 'user-1' }), { status: 200 });
+    }
+    if (url.endsWith('/rest/v1/rpc/acquire_pronunciation_request')) {
+      acquireHeaders = init?.headers as Record<string, string>;
+      return new Response(JSON.stringify(allowedLease()), { status: 200 });
+    }
+    if (url.endsWith('/rest/v1/rpc/release_pronunciation_request')) {
+      return new Response('null', { status: 200 });
+    }
+    return new Response(null, { status: 404 });
+  }) as typeof fetch, async () => {
+    const { response } = createResponse();
+    await withPronunciationSecurity(request(), response, 'examples', async () => {});
+  }, legacyJwt);
+
+  assert.equal(acquireHeaders?.apikey, legacyJwt);
+  assert.equal(acquireHeaders?.Authorization, `Bearer ${legacyJwt}`);
 });
 
 test('the fourth global TTS start in one second is rejected across principals and recovers', async () => {

@@ -163,11 +163,7 @@ async function acquirePronunciationLease(
     `${config.supabaseUrl}/rest/v1/rpc/acquire_pronunciation_request`,
     {
       method: 'POST',
-      headers: {
-        apikey: config.supabaseServiceRoleKey,
-        Authorization: `Bearer ${config.supabaseServiceRoleKey}`,
-        'Content-Type': 'application/json',
-      },
+      headers: supabaseAdminHeaders(config.supabaseServiceRoleKey),
       body: JSON.stringify({
         p_owner: user.id,
         p_operation: endpoint,
@@ -233,11 +229,7 @@ async function releasePronunciationLease(lease: PronunciationLease): Promise<voi
       `${lease.config.supabaseUrl}/rest/v1/rpc/release_pronunciation_request`,
       {
         method: 'POST',
-        headers: {
-          apikey: lease.config.supabaseServiceRoleKey,
-          Authorization: `Bearer ${lease.config.supabaseServiceRoleKey}`,
-          'Content-Type': 'application/json',
-        },
+        headers: supabaseAdminHeaders(lease.config.supabaseServiceRoleKey),
         body: JSON.stringify({
           p_owner: lease.owner,
           p_lease_id: lease.id,
@@ -297,6 +289,17 @@ function firstConfigured(...values: (string | undefined)[]): string {
     if (trimmed) return trimmed;
   }
   return '';
+}
+
+function supabaseAdminHeaders(key: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    apikey: key,
+    'Content-Type': 'application/json',
+  };
+  if (!key.startsWith('sb_secret_')) {
+    headers.Authorization = `Bearer ${key}`;
+  }
+  return headers;
 }
 
 function bearerToken(req: PronunciationSecurityRequest): string {
