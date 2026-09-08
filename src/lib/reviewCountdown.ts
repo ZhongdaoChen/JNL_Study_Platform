@@ -17,3 +17,11 @@ export function countdownSecForWord(baseSec: number, text: string): number {
     ? baseSec * PHRASE_COUNTDOWN_MULTIPLIER
     : baseSec;
 }
+
+// 新词仅在倒计时启用且本次模块会话尚未手动启动时保持暂停。
+export function shouldPauseNewReviewCountdown(
+  countdownEnabled: boolean,
+  hasManuallyStarted: boolean,
+): boolean {
+  return countdownEnabled && !hasManuallyStarted;
+}

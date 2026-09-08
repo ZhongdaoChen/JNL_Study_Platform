@@ -4,6 +4,7 @@ import {
   countdownSecForWord,
   entryWordCount,
   PHRASE_MIN_WORDS,
+  shouldPauseNewReviewCountdown,
 } from '../src/lib/reviewCountdown.ts';
 
 test('single word and two-word entries keep the configured countdown', () => {
@@ -34,4 +35,17 @@ test('chinese single-character entries count as one word', () => {
 
 test('phrase threshold is three words', () => {
   assert.equal(PHRASE_MIN_WORDS, 3);
+});
+
+test('countdown-enabled words stay paused until the session is manually started', () => {
+  assert.equal(shouldPauseNewReviewCountdown(true, false), true);
+});
+
+test('new words auto-start after the session countdown has been manually started', () => {
+  assert.equal(shouldPauseNewReviewCountdown(true, true), false);
+});
+
+test('countdown-disabled words do not enter a paused countdown state', () => {
+  assert.equal(shouldPauseNewReviewCountdown(false, false), false);
+  assert.equal(shouldPauseNewReviewCountdown(false, true), false);
 });
