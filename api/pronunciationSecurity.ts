@@ -5,13 +5,6 @@ export interface PronunciationSecurityRequest {
   socket?: { remoteAddress?: string | null };
 }
 
-export interface PronunciationGlobalRateLimit {
-  resourceKey: string;
-  modelKey: string;
-  perSecond: number;
-  perMinute: number;
-}
-
 export interface PronunciationSecurityResponse {
   status(code: number): PronunciationSecurityResponse;
   json(body: unknown): void;
@@ -21,28 +14,38 @@ export interface PronunciationSecurityResponse {
 interface SecurityConfig {
   supabaseUrl: string;
   supabaseAnonKey: string;
+  supabaseServiceRoleKey: string;
   rateLimitSecret: string;
-  principalRateLimit: number;
-  ipRateLimit: number;
-  principalConcurrency: number;
-  ipConcurrency: number;
-  leaseSeconds: number;
   securityTimeoutMs: number;
   upstreamTimeoutMs: number;
 }
 
 interface PronunciationLease {
   id: string;
-  accessToken: string;
+  owner: string;
+  providerTimeoutMs: number;
   config: SecurityConfig;
 }
 
 interface AcquireResult {
   allowed: boolean;
   lease_id?: string;
+  granted_at?: string;
+  expires_at?: string;
   reason?: 'rate_limit' | 'global_rate_limit' | 'concurrency_limit';
   retry_after_seconds?: number;
 }
+
+interface ProviderDeadlineInput {
+  grantedAt: string;
+  expiresAt: string;
+  acquireStartedAtMs: number;
+  responseReceivedAtMs: number;
+  configuredTimeoutMs: number;
+}
+
+const LEASE_DEADLINE_SAFETY_MS = 1_000;
+const MIN_PROVIDER_DEADLINE_MS = 250;
 
 export interface PronunciationSecurityContext {
   signal: AbortSignal;
@@ -74,11 +77,10 @@ export async function withPronunciationSecurity(
   res: PronunciationSecurityResponse,
   endpoint: PronunciationEndpoint,
   work: (context: PronunciationSecurityContext) => Promise<void>,
-  globalRateLimit?: PronunciationGlobalRateLimit,
 ): Promise<void> {
   let lease: PronunciationLease;
   try {
-    lease = await acquirePronunciationLease(req, endpoint, globalRateLimit);
+    lease = await acquirePronunciationLease(req, endpoint);
   } catch (error) {
     if (error instanceof PronunciationTimeoutError) {
       res.status(504).json({ error: error.message });
@@ -96,7 +98,7 @@ export async function withPronunciationSecurity(
   }
 
   const deadline = createAbortableDeadline(
-    lease.config.upstreamTimeoutMs,
+    lease.providerTimeoutMs,
     '语音服务上游请求超时，请稍后重试',
   );
   try {
@@ -123,7 +125,6 @@ export async function withPronunciationSecurity(
 async function acquirePronunciationLease(
   req: PronunciationSecurityRequest,
   endpoint: PronunciationEndpoint,
-  globalRateLimit?: PronunciationGlobalRateLimit,
 ): Promise<PronunciationLease> {
   const config = readSecurityConfig();
   const accessToken = bearerToken(req);
@@ -148,29 +149,20 @@ async function acquirePronunciationLease(
   }
 
   const ipHash = await hashClientIp(clientIp(req), config.rateLimitSecret);
+  const acquireStartedAtMs = Date.now();
   const { response: acquireResponse, data: acquireData } = await fetchJsonWithDeadline(
     `${config.supabaseUrl}/rest/v1/rpc/acquire_pronunciation_request`,
     {
       method: 'POST',
       headers: {
-        apikey: config.supabaseAnonKey,
-        Authorization: `Bearer ${accessToken}`,
+        apikey: config.supabaseServiceRoleKey,
+        Authorization: `Bearer ${config.supabaseServiceRoleKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        p_scope: 'pronunciation',
-        p_endpoint: endpoint,
+        p_owner: user.id,
+        p_operation: endpoint,
         p_ip_hash: ipHash,
-        p_resource_key: globalRateLimit?.resourceKey ?? null,
-        p_model_key: globalRateLimit?.modelKey ?? null,
-        p_global_per_second: globalRateLimit?.perSecond ?? 0,
-        p_global_per_minute: globalRateLimit?.perMinute ?? 0,
-        p_window_seconds: 60,
-        p_principal_limit: config.principalRateLimit,
-        p_ip_limit: config.ipRateLimit,
-        p_principal_concurrency: config.principalConcurrency,
-        p_ip_concurrency: config.ipConcurrency,
-        p_lease_seconds: config.leaseSeconds,
       }),
     },
     config.securityTimeoutMs,
@@ -197,11 +189,32 @@ async function acquirePronunciationLease(
   if (typeof result.lease_id !== 'string' || !result.lease_id.trim()) {
     throw new SecurityError(503, '语音服务访问控制暂时不可用');
   }
+  const acquiredLease: PronunciationLease = {
+    id: result.lease_id,
+    owner: user.id,
+    providerTimeoutMs: 0,
+    config,
+  };
+  if (typeof result.granted_at !== 'string' || typeof result.expires_at !== 'string') {
+    await releasePronunciationLease(acquiredLease);
+    throw new SecurityError(503, '语音服务访问控制暂时不可用');
+  }
+
+  const providerTimeoutMs = calculateProviderDeadlineMs({
+    grantedAt: result.granted_at,
+    expiresAt: result.expires_at,
+    acquireStartedAtMs,
+    responseReceivedAtMs: Date.now(),
+    configuredTimeoutMs: config.upstreamTimeoutMs,
+  });
+  if (providerTimeoutMs === null) {
+    await releasePronunciationLease(acquiredLease);
+    throw new SecurityError(503, '语音服务访问控制租约不足，请稍后重试');
+  }
 
   return {
-    id: result.lease_id,
-    accessToken,
-    config,
+    ...acquiredLease,
+    providerTimeoutMs,
   };
 }
 
@@ -212,11 +225,14 @@ async function releasePronunciationLease(lease: PronunciationLease): Promise<voi
       {
         method: 'POST',
         headers: {
-          apikey: lease.config.supabaseAnonKey,
-          Authorization: `Bearer ${lease.accessToken}`,
+          apikey: lease.config.supabaseServiceRoleKey,
+          Authorization: `Bearer ${lease.config.supabaseServiceRoleKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ p_lease_id: lease.id }),
+        body: JSON.stringify({
+          p_owner: lease.owner,
+          p_lease_id: lease.id,
+        }),
       },
       lease.config.securityTimeoutMs,
       '语音服务访问控制超时，请稍后重试',
@@ -235,58 +251,33 @@ function readSecurityConfig(): SecurityConfig {
     process.env.SUPABASE_ANON_KEY,
     process.env.VITE_SUPABASE_ANON_KEY,
   );
+  const supabaseServiceRoleKey = firstConfigured(
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+  );
   const rateLimitSecret = firstConfigured(
     process.env.PRONUNCIATION_RATE_LIMIT_SECRET,
     process.env.QWEN_API_KEY,
   );
-  if (!supabaseUrl || !supabaseAnonKey || !rateLimitSecret) {
+  if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey || !rateLimitSecret) {
     throw new SecurityError(503, '云端语音服务未配置身份验证');
   }
-
-  const leaseSeconds = envInteger(
-    'PRONUNCIATION_LEASE_SECONDS',
-    30,
-    5,
-    120,
-  );
-  const deadlineCeilingMs = Math.max(1, leaseSeconds * 1_000 - 1_000);
 
   return {
     supabaseUrl,
     supabaseAnonKey,
+    supabaseServiceRoleKey,
     rateLimitSecret,
-    principalRateLimit: envInteger(
-      'PRONUNCIATION_RATE_LIMIT_PER_MINUTE',
-      30,
+    securityTimeoutMs: envInteger(
+      'PRONUNCIATION_SECURITY_TIMEOUT_MS',
+      5_000,
       1,
-      600,
+      120_000,
     ),
-    ipRateLimit: envInteger(
-      'PRONUNCIATION_IP_RATE_LIMIT_PER_MINUTE',
-      90,
+    upstreamTimeoutMs: envInteger(
+      'PRONUNCIATION_UPSTREAM_TIMEOUT_MS',
+      20_000,
       1,
-      2_000,
-    ),
-    principalConcurrency: envInteger(
-      'PRONUNCIATION_CONCURRENCY_PER_USER',
-      2,
-      1,
-      10,
-    ),
-    ipConcurrency: envInteger(
-      'PRONUNCIATION_CONCURRENCY_PER_IP',
-      6,
-      1,
-      50,
-    ),
-    leaseSeconds,
-    securityTimeoutMs: Math.min(
-      envInteger('PRONUNCIATION_SECURITY_TIMEOUT_MS', 5_000, 1, 120_000),
-      deadlineCeilingMs,
-    ),
-    upstreamTimeoutMs: Math.min(
-      envInteger('PRONUNCIATION_UPSTREAM_TIMEOUT_MS', 20_000, 1, 120_000),
-      deadlineCeilingMs,
+      120_000,
     ),
   };
 }
@@ -422,6 +413,39 @@ function normalizeAcquireResult(value: unknown): AcquireResult | null {
   const candidate = Array.isArray(value) ? value[0] : value;
   if (!isRecord(candidate) || typeof candidate.allowed !== 'boolean') return null;
   return candidate as unknown as AcquireResult;
+}
+
+export function calculateProviderDeadlineMs({
+  grantedAt,
+  expiresAt,
+  acquireStartedAtMs,
+  responseReceivedAtMs,
+  configuredTimeoutMs,
+}: ProviderDeadlineInput): number | null {
+  const grantedAtMs = Date.parse(grantedAt);
+  const expiresAtMs = Date.parse(expiresAt);
+  if (
+    !Number.isFinite(grantedAtMs)
+    || !Number.isFinite(expiresAtMs)
+    || !Number.isFinite(acquireStartedAtMs)
+    || !Number.isFinite(responseReceivedAtMs)
+    || !Number.isFinite(configuredTimeoutMs)
+    || expiresAtMs <= grantedAtMs
+    || responseReceivedAtMs < acquireStartedAtMs
+    || configuredTimeoutMs <= 0
+  ) {
+    return null;
+  }
+
+  const leaseDurationMs = expiresAtMs - grantedAtMs;
+  const acquireElapsedMs = responseReceivedAtMs - acquireStartedAtMs;
+  const remainingLeaseMs = Math.min(
+    expiresAtMs - responseReceivedAtMs,
+    leaseDurationMs - acquireElapsedMs,
+  );
+  const safeRemainingMs = Math.floor(remainingLeaseMs - LEASE_DEADLINE_SAFETY_MS);
+  if (safeRemainingMs < MIN_PROVIDER_DEADLINE_MS) return null;
+  return Math.min(Math.floor(configuredTimeoutMs), safeRemainingMs);
 }
 
 function envInteger(

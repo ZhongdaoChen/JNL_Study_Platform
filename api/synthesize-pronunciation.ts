@@ -15,12 +15,10 @@ import {
 
 const TTS_MODEL = process.env.QWEN_TTS_MODEL ?? 'qwen3-tts-flash';
 const TTS_VOICE = process.env.QWEN_TTS_VOICE ?? 'Cherry';
-const TTS_GLOBAL_RATE_LIMIT = {
-  resourceKey: 'dashscope-tts',
-  modelKey: TTS_MODEL,
-  perSecond: 3,
-  perMinute: 180,
-} as const;
+const TRUSTED_TTS_RESULT_HOSTS = new Set([
+  'dashscope-result-bj.oss-cn-beijing.aliyuncs.com',
+  'dashscope-result-wlcb.oss-cn-wulanchabu.aliyuncs.com',
+]);
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method !== 'POST') {
@@ -28,16 +26,6 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return;
   }
 
-  await withPronunciationSecurity(req, res, 'synthesis', (context) => (
-    handleAuthorizedSynthesis(req, res, context)
-  ), TTS_GLOBAL_RATE_LIMIT);
-}
-
-async function handleAuthorizedSynthesis(
-  req: ApiRequest,
-  res: ApiResponse,
-  context: PronunciationSecurityContext,
-): Promise<void> {
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) {
     res.status(500).json({ error: '语音合成服务未配置' });
@@ -56,6 +44,17 @@ async function handleAuthorizedSynthesis(
     return;
   }
 
+  await withPronunciationSecurity(req, res, 'synthesis', (context) => (
+    handleAuthorizedSynthesis(res, context, text, apiKey)
+  ));
+}
+
+async function handleAuthorizedSynthesis(
+  res: ApiResponse,
+  context: PronunciationSecurityContext,
+  text: string,
+  apiKey: string,
+): Promise<void> {
   try {
     const { response: upstream, data: upstreamData } = await context.fetchJson(
       DASH_SCOPE_MULTIMODAL_URL,
@@ -81,7 +80,7 @@ async function handleAuthorizedSynthesis(
       return;
     }
 
-    const audioUrl = extractHttpsAudioUrl(upstreamData);
+    const audioUrl = extractTrustedAudioUrl(upstreamData);
     if (!audioUrl) {
       res.status(502).json({ error: '语音合成结果无效' });
       return;
@@ -97,7 +96,7 @@ async function handleAuthorizedSynthesis(
   }
 }
 
-function extractHttpsAudioUrl(value: unknown): string | null {
+function extractTrustedAudioUrl(value: unknown): string | null {
   if (
     !isRecord(value)
     || !isRecord(value.output)
@@ -110,7 +109,17 @@ function extractHttpsAudioUrl(value: unknown): string | null {
   const rawUrl = value.output.audio.url.trim();
   try {
     const url = new URL(rawUrl);
-    return url.protocol === 'https:' ? url.href : null;
+    if (
+      (url.protocol !== 'http:' && url.protocol !== 'https:')
+      || !TRUSTED_TTS_RESULT_HOSTS.has(url.hostname.toLowerCase())
+      || url.username
+      || url.password
+      || url.port
+    ) {
+      return null;
+    }
+    url.protocol = 'https:';
+    return url.href;
   } catch {
     return null;
   }

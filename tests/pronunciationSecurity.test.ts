@@ -5,11 +5,26 @@ import {
   type PronunciationSecurityRequest,
   type PronunciationSecurityResponse,
 } from '../api/pronunciationSecurity.ts';
+import * as pronunciationSecurity from '../api/pronunciationSecurity.ts';
 
 interface ResponseResult {
   status: number;
   body: unknown;
   headers: Record<string, string>;
+}
+
+function allowedLease(
+  leaseId = '11111111-1111-4111-8111-111111111111',
+  grantedAtMs = Date.now(),
+  leaseMs = 30_000,
+): Record<string, unknown> {
+  return {
+    allowed: true,
+    lease_id: leaseId,
+    granted_at: new Date(grantedAtMs).toISOString(),
+    expires_at: new Date(grantedAtMs + leaseMs).toISOString(),
+    retry_after_seconds: 0,
+  };
 }
 
 function createResponse(): {
@@ -71,19 +86,19 @@ async function withSecurityEnvironment(
   const originals = {
     SUPABASE_URL: process.env.SUPABASE_URL,
     SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     PRONUNCIATION_RATE_LIMIT_SECRET: process.env.PRONUNCIATION_RATE_LIMIT_SECRET,
     PRONUNCIATION_SECURITY_TIMEOUT_MS: process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS,
     PRONUNCIATION_UPSTREAM_TIMEOUT_MS: process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS,
-    PRONUNCIATION_LEASE_SECONDS: process.env.PRONUNCIATION_LEASE_SECONDS,
     QWEN_API_KEY: process.env.QWEN_API_KEY,
   };
   globalThis.fetch = fetchImplementation;
   process.env.SUPABASE_URL = 'https://project.supabase.co';
   process.env.SUPABASE_ANON_KEY = 'anon-key';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key';
   process.env.PRONUNCIATION_RATE_LIMIT_SECRET = 'rate-limit-secret';
   process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS = '20';
   process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS = '25';
-  process.env.PRONUNCIATION_LEASE_SECONDS = '30';
 
   try {
     await run();
@@ -160,19 +175,17 @@ test('hanging Supabase acquire RPC aborts before protected work starts', { timeo
 
 test('hanging Supabase release RPC is aborted instead of extending the lease', { timeout: 1_000 }, async () => {
   let releaseAborted = false;
+  let releaseInit: RequestInit | undefined;
   await withSecurityEnvironment((async (input, init) => {
     const url = String(input);
     if (url.endsWith('/auth/v1/user')) {
       return new Response(JSON.stringify({ id: 'user-1' }), { status: 200 });
     }
     if (url.endsWith('/rest/v1/rpc/acquire_pronunciation_request')) {
-      return new Response(JSON.stringify({
-        allowed: true,
-        lease_id: '11111111-1111-4111-8111-111111111111',
-        retry_after_seconds: 0,
-      }), { status: 200 });
+      return new Response(JSON.stringify(allowedLease()), { status: 200 });
     }
     if (url.endsWith('/rest/v1/rpc/release_pronunciation_request')) {
+      releaseInit = init;
       return hangsUntilAborted(init, () => {
         releaseAborted = true;
       });
@@ -191,6 +204,13 @@ test('hanging Supabase release RPC is aborted instead of extending the lease', {
 
     assert.equal(result.status, 200);
     assert.equal(releaseAborted, true);
+    const headers = releaseInit?.headers as Record<string, string>;
+    assert.equal(headers.apikey, 'service-role-key');
+    assert.equal(headers.Authorization, 'Bearer service-role-key');
+    assert.deepEqual(JSON.parse(String(releaseInit?.body)), {
+      p_owner: 'user-1',
+      p_lease_id: '11111111-1111-4111-8111-111111111111',
+    });
     assert.ok(Date.now() - startedAt < 1_000);
   });
 });
@@ -243,7 +263,7 @@ test('invalid Supabase bearer authentication is rejected server-side', async () 
   });
 });
 
-test('distributed rate-limit denial returns 429 and Retry-After', async () => {
+test('distributed rate-limit denial uses service role and a minimal trusted payload', async () => {
   const calls: { url: string; init?: RequestInit }[] = [];
   await withSecurityEnvironment((async (input, init) => {
     const url = String(input);
@@ -277,8 +297,21 @@ test('distributed rate-limit denial returns 429 and Retry-After', async () => {
     assert.deepEqual(result.body, { error: '请求过于频繁，请稍后再试' });
     assert.equal(protectedWorkCalled, false);
 
+    const authHeaders = calls[0].init?.headers as Record<string, string>;
+    assert.equal(authHeaders.apikey, 'anon-key');
+    assert.equal(authHeaders.Authorization, 'Bearer valid-token');
+
+    const acquireHeaders = calls[1].init?.headers as Record<string, string>;
+    assert.equal(acquireHeaders.apikey, 'service-role-key');
+    assert.equal(acquireHeaders.Authorization, 'Bearer service-role-key');
     const acquireBody = JSON.parse(String(calls[1].init?.body));
-    assert.equal(acquireBody.p_scope, 'pronunciation');
+    assert.deepEqual(Object.keys(acquireBody).sort(), [
+      'p_ip_hash',
+      'p_operation',
+      'p_owner',
+    ]);
+    assert.equal(acquireBody.p_owner, 'user-1');
+    assert.equal(acquireBody.p_operation, 'synthesis');
     assert.match(acquireBody.p_ip_hash, /^[a-f0-9]{64}$/);
     assert.notEqual(acquireBody.p_ip_hash, '203.0.113.9');
   });
@@ -304,8 +337,8 @@ test('the fourth global TTS start in one second is rejected across principals an
       const oneSecondStarts = starts.filter((startedAt) => nowMs - startedAt < 1_000);
       const oneMinuteStarts = starts.filter((startedAt) => nowMs - startedAt < 60_000);
       if (
-        oneSecondStarts.length >= Number(body.p_global_per_second)
-        || oneMinuteStarts.length >= Number(body.p_global_per_minute)
+        oneSecondStarts.length >= 3
+        || oneMinuteStarts.length >= 180
       ) {
         return new Response(JSON.stringify({
           allowed: false,
@@ -315,11 +348,9 @@ test('the fourth global TTS start in one second is rejected across principals an
       }
       starts.push(nowMs);
       leaseSequence += 1;
-      return new Response(JSON.stringify({
-        allowed: true,
-        lease_id: `lease-${leaseSequence}`,
-        retry_after_seconds: 0,
-      }), { status: 200 });
+      return new Response(JSON.stringify(allowedLease(`lease-${leaseSequence}`)), {
+        status: 200,
+      });
     }
     if (url.endsWith('/rest/v1/rpc/release_pronunciation_request')) {
       return new Response('null', { status: 200 });
@@ -335,12 +366,6 @@ test('the fourth global TTS start in one second is rejected across principals an
         'synthesis',
         async () => {
           worked = true;
-        },
-        {
-          resourceKey: 'dashscope-tts',
-          modelKey: 'qwen3-tts-flash',
-          perSecond: 3,
-          perMinute: 180,
         },
       );
       return { ...result, worked };
@@ -358,10 +383,12 @@ test('the fourth global TTS start in one second is rejected across principals an
     assert.equal(denied.worked, false);
 
     for (const body of acquireBodies) {
-      assert.equal(body.p_resource_key, 'dashscope-tts');
-      assert.equal(body.p_model_key, 'qwen3-tts-flash');
-      assert.equal(body.p_global_per_second, 3);
-      assert.equal(body.p_global_per_minute, 180);
+      assert.deepEqual(Object.keys(body).sort(), [
+        'p_ip_hash',
+        'p_operation',
+        'p_owner',
+      ]);
+      assert.equal(body.p_operation, 'synthesis');
     }
 
     nowMs = 1_001;
@@ -380,11 +407,7 @@ test('concurrency lease is released even when protected work throws', async () =
     }
     if (url.endsWith('/rest/v1/rpc/acquire_pronunciation_request')) {
       rpcCalls.push('acquire');
-      return new Response(JSON.stringify({
-        allowed: true,
-        lease_id: '11111111-1111-4111-8111-111111111111',
-        retry_after_seconds: 0,
-      }), { status: 200 });
+      return new Response(JSON.stringify(allowedLease()), { status: 200 });
     }
     if (url.endsWith('/rest/v1/rpc/release_pronunciation_request')) {
       rpcCalls.push('release');
@@ -437,6 +460,102 @@ test('missing cloud configuration fails closed instead of enabling local anonymo
   assert.equal(protectedWorkCalled, false);
 });
 
+test('missing service-role configuration fails closed before any network call', async () => {
+  let fetchCalled = false;
+  await withSecurityEnvironment((async () => {
+    fetchCalled = true;
+    return new Response();
+  }) as typeof fetch, async () => {
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const { response, result } = createResponse();
+    let protectedWorkCalled = false;
+
+    await withPronunciationSecurity(
+      request(),
+      response,
+      'assessment',
+      async () => {
+        protectedWorkCalled = true;
+      },
+    );
+
+    assert.equal(result.status, 503);
+    assert.deepEqual(result.body, { error: '云端语音服务未配置身份验证' });
+    assert.equal(fetchCalled, false);
+    assert.equal(protectedWorkCalled, false);
+  });
+});
+
+test('provider deadline is derived from the conservative remaining lease time', () => {
+  const helper = (
+    pronunciationSecurity as typeof pronunciationSecurity & {
+      calculateProviderDeadlineMs?: (input: {
+        grantedAt: string;
+        expiresAt: string;
+        acquireStartedAtMs: number;
+        responseReceivedAtMs: number;
+        configuredTimeoutMs: number;
+      }) => number | null;
+    }
+  ).calculateProviderDeadlineMs;
+
+  assert.equal(typeof helper, 'function');
+  assert.equal(helper?.({
+    grantedAt: new Date(10_000).toISOString(),
+    expiresAt: new Date(40_000).toISOString(),
+    acquireStartedAtMs: 10_000,
+    responseReceivedAtMs: 25_000,
+    configuredTimeoutMs: 20_000,
+  }), 14_000);
+  assert.equal(helper?.({
+    grantedAt: new Date(10_000).toISOString(),
+    expiresAt: new Date(40_000).toISOString(),
+    acquireStartedAtMs: 39_000,
+    responseReceivedAtMs: 39_500,
+    configuredTimeoutMs: 20_000,
+  }), null);
+});
+
+test('an acquired lease with insufficient provider time is released before work starts', async () => {
+  let releaseCalls = 0;
+  await withSecurityEnvironment((async (input) => {
+    const url = String(input);
+    if (url.endsWith('/auth/v1/user')) {
+      return new Response(JSON.stringify({ id: 'user-1' }), { status: 200 });
+    }
+    if (url.endsWith('/rest/v1/rpc/acquire_pronunciation_request')) {
+      return new Response(JSON.stringify(
+        allowedLease(
+          '11111111-1111-4111-8111-111111111111',
+          Date.now() - 29_500,
+        ),
+      ), { status: 200 });
+    }
+    if (url.endsWith('/rest/v1/rpc/release_pronunciation_request')) {
+      releaseCalls += 1;
+      return new Response('null', { status: 200 });
+    }
+    return new Response(null, { status: 404 });
+  }) as typeof fetch, async () => {
+    const { response, result } = createResponse();
+    let protectedWorkCalled = false;
+
+    await withPronunciationSecurity(
+      request(),
+      response,
+      'assessment',
+      async () => {
+        protectedWorkCalled = true;
+      },
+    );
+
+    assert.equal(result.status, 503);
+    assert.deepEqual(result.body, { error: '语音服务访问控制租约不足，请稍后重试' });
+    assert.equal(protectedWorkCalled, false);
+    assert.equal(releaseCalls, 1);
+  });
+});
+
 test('an empty dedicated hash secret falls back to the configured provider key', async () => {
   await withSecurityEnvironment((async (input) => {
     const url = String(input);
@@ -444,11 +563,7 @@ test('an empty dedicated hash secret falls back to the configured provider key',
       return new Response(JSON.stringify({ id: 'user-1' }), { status: 200 });
     }
     if (url.endsWith('/rest/v1/rpc/acquire_pronunciation_request')) {
-      return new Response(JSON.stringify({
-        allowed: true,
-        lease_id: '11111111-1111-4111-8111-111111111111',
-        retry_after_seconds: 0,
-      }), { status: 200 });
+      return new Response(JSON.stringify(allowedLease()), { status: 200 });
     }
     if (url.endsWith('/rest/v1/rpc/release_pronunciation_request')) {
       return new Response('null', { status: 200 });

@@ -45,9 +45,9 @@ npm run dev
 
 ## 接入 Supabase（多设备同步）
 1. 在 supabase.com 新建项目。
-2. 在 SQL Editor 执行 `supabase/schema.sql`（升级后需重跑，幂等不丢数据），创建 `children / sentences / words / review_logs / feedback / user_settings`、语音请求限流表，以及管理员、数据共享、语音限流 RPC。已上线旧库也必须在部署新版 Serverless 函数前重跑一次，让 `words.pronunciation_examples`、限流表的 `resource_key / model_key` 字段和新版 RPC 签名补齐；否则发音接口会按设计关闭并返回 503。
-3. 复制 `.env.example` 为 `.env.local`，填入 `VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`；AI 例句、配图和中文读发音接口共用服务端 `QWEN_API_KEY`（不要加 `VITE_` 前缀）。发音接口要求有效的 Supabase 登录会话；浏览器本地存储模式会明确提示语音云服务不可用，而不会匿名调用付费接口。
-4. 如需覆盖默认模型 / 音色，可选填 `QWEN_PRONUNCIATION_MODEL`、`QWEN_PRONUNCIATION_JUDGE_MODEL`、`QWEN_TTS_MODEL`、`QWEN_TTS_VOICE`。可选的 `PRONUNCIATION_*` 变量用于调整每用户/IP的每分钟、并发限制及服务端超时；超时会自动限制在 30 秒租约以内。限流状态存储在 Supabase，因此多台 Vercel 实例共享；默认 `qwen3-tts-flash` 还会按显式资源/模型键执行账户全局滚动限制（3 次/秒、180 次/分钟），不能通过切换用户或 IP 绕过。
+2. 在 SQL Editor 执行 `supabase/schema.sql`（升级后需重跑，幂等不丢数据），创建 `children / sentences / words / review_logs / feedback / user_settings`、语音请求限流表，以及管理员、数据共享、语音限流 RPC。已上线旧库必须先重跑 schema，再部署新版 Serverless 函数；否则发音接口会按设计关闭并返回 503。语音限流 RPC 只授予 `service_role`，`public / anon / authenticated` 均无执行权限。
+3. 复制 `.env.example` 为 `.env.local`，填入 `VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`，并只在服务端环境配置 `SUPABASE_SERVICE_ROLE_KEY` 和 `QWEN_API_KEY`（两者都绝不能加 `VITE_` 前缀）。浏览器 bearer token 只用于向 Supabase Auth 验证身份；验证成功后，Serverless 才会用 service-role key 和已验证的用户 ID 调用限流 RPC。缺少 service-role key 时发音接口会失败关闭并返回 503。
+4. 如需覆盖默认模型 / 音色，可选填 `QWEN_PRONUNCIATION_MODEL`、`QWEN_PRONUNCIATION_JUDGE_MODEL`、`QWEN_TTS_MODEL`、`QWEN_TTS_VOICE`。`PRONUNCIATION_RATE_LIMIT_SECRET` 可单独设置 IP 指纹密钥；`PRONUNCIATION_SECURITY_TIMEOUT_MS` 和 `PRONUNCIATION_UPSTREAM_TIMEOUT_MS` 可调整服务端超时。每类操作的用户/IP频率、并发、30 秒租约以及 synthesis 的账户级 `dashscope-tts / qwen3-tts-flash` 滚动限制（3 次/秒、180 次/分钟）均硬编码在 SQL，调用方不能覆盖。上游 deadline 按 RPC 返回的实际剩余租约计算并预留安全余量。
 5. 配好 env 后 `db.ts` 自动切换为云端同步。
 
 ## 部署

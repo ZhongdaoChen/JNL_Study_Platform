@@ -35,16 +35,6 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return;
   }
 
-  await withPronunciationSecurity(req, res, 'examples', (context) => (
-    handleAuthorizedExampleGeneration(req, res, context)
-  ));
-}
-
-async function handleAuthorizedExampleGeneration(
-  req: ApiRequest,
-  res: ApiResponse,
-  context: PronunciationSecurityContext,
-): Promise<void> {
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) {
     res.status(500).json({ error: '辅助词服务未配置' });
@@ -63,6 +53,17 @@ async function handleAuthorizedExampleGeneration(
     return;
   }
 
+  await withPronunciationSecurity(req, res, 'examples', (context) => (
+    handleAuthorizedExampleGeneration(res, context, character, apiKey)
+  ));
+}
+
+async function handleAuthorizedExampleGeneration(
+  res: ApiResponse,
+  context: PronunciationSecurityContext,
+  character: string,
+  apiKey: string,
+): Promise<void> {
   try {
     const { response: upstream, data: upstreamData } = await context.fetchJson(
       DASH_SCOPE_CHAT_COMPLETIONS_URL,

@@ -94,10 +94,10 @@ async function withServerEnvironment(
   const originalApiKey = process.env.QWEN_API_KEY;
   const originalSupabaseUrl = process.env.SUPABASE_URL;
   const originalSupabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+  const originalSupabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const originalRateSecret = process.env.PRONUNCIATION_RATE_LIMIT_SECRET;
   const originalSecurityTimeout = process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS;
   const originalUpstreamTimeout = process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS;
-  const originalLeaseSeconds = process.env.PRONUNCIATION_LEASE_SECONDS;
   const state: ServerEnvironmentState = { releaseCalls: 0, acquireBodies: [] };
   globalThis.fetch = (async (input, init) => {
     const url = String(input);
@@ -106,9 +106,12 @@ async function withServerEnvironment(
     }
     if (url === 'https://project.supabase.co/rest/v1/rpc/acquire_pronunciation_request') {
       state.acquireBodies.push(JSON.parse(String(init?.body)));
+      const grantedAt = Date.now();
       return jsonResponse({
         allowed: true,
         lease_id: '11111111-1111-4111-8111-111111111111',
+        granted_at: new Date(grantedAt).toISOString(),
+        expires_at: new Date(grantedAt + 30_000).toISOString(),
         retry_after_seconds: 0,
       });
     }
@@ -121,10 +124,10 @@ async function withServerEnvironment(
   process.env.QWEN_API_KEY = 'server-test-key';
   process.env.SUPABASE_URL = 'https://project.supabase.co';
   process.env.SUPABASE_ANON_KEY = 'anon-key';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-key';
   process.env.PRONUNCIATION_RATE_LIMIT_SECRET = 'rate-limit-secret';
   process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS = '20';
   process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS = '25';
-  process.env.PRONUNCIATION_LEASE_SECONDS = '30';
 
   try {
     await run(state);
@@ -136,14 +139,17 @@ async function withServerEnvironment(
     else process.env.SUPABASE_URL = originalSupabaseUrl;
     if (originalSupabaseAnonKey === undefined) delete process.env.SUPABASE_ANON_KEY;
     else process.env.SUPABASE_ANON_KEY = originalSupabaseAnonKey;
+    if (originalSupabaseServiceRoleKey === undefined) {
+      delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    } else {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = originalSupabaseServiceRoleKey;
+    }
     if (originalRateSecret === undefined) delete process.env.PRONUNCIATION_RATE_LIMIT_SECRET;
     else process.env.PRONUNCIATION_RATE_LIMIT_SECRET = originalRateSecret;
     if (originalSecurityTimeout === undefined) delete process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS;
     else process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS = originalSecurityTimeout;
     if (originalUpstreamTimeout === undefined) delete process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS;
     else process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS = originalUpstreamTimeout;
-    if (originalLeaseSeconds === undefined) delete process.env.PRONUNCIATION_LEASE_SECONDS;
-    else process.env.PRONUNCIATION_LEASE_SECONDS = originalLeaseSeconds;
   }
 }
 
@@ -350,6 +356,41 @@ test('synthesis validation requires 1 to 40 Chinese characters', () => {
   assert.throws(() => validateSynthesisRequest({ text: '' }), /text/);
   assert.throws(() => validateSynthesisRequest({ text: '中'.repeat(41) }), /40/);
   assert.throws(() => validateSynthesisRequest({ text: 'hello' }), /text/);
+});
+
+test('invalid paid requests are rejected before acquiring provider capacity', async () => {
+  let providerFetches = 0;
+  await withServerEnvironment((async () => {
+    providerFetches += 1;
+    return jsonResponse({});
+  }) as typeof fetch, async (state) => {
+    const cases: Array<{ handler: Handler; body: unknown }> = [
+      {
+        handler: assessPronunciation,
+        body: { target: 'hello', mimeType: 'audio/wav', audioBase64: 'AQ==' },
+      },
+      {
+        handler: generatePronunciationExamples,
+        body: { character: '中国' },
+      },
+      {
+        handler: synthesizePronunciation,
+        body: { text: 'hello' },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await invokeHandler(testCase.handler, {
+        method: 'POST',
+        body: testCase.body,
+      });
+      assert.equal(result.status, 400);
+    }
+
+    assert.equal(state.acquireBodies.length, 0);
+    assert.equal(state.releaseCalls, 0);
+    assert.equal(providerFetches, 0);
+  });
 });
 
 test('assessment uses the documented Qwen Audio ASR contract and a bounded polyphonic judgment', async () => {
@@ -590,15 +631,21 @@ test('helper-word generation returns 502 unless exactly three valid examples rem
   });
 });
 
-test('synthesis uses default model and voice and returns an HTTPS audio URL', async () => {
+test('synthesis upgrades a documented signed DashScope OSS HTTP URL to HTTPS', async () => {
   let requestUrl = '';
   let requestInit: RequestInit | undefined;
+  const signedHttpUrl =
+    'http://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav'
+    + '?Expires=1766113409&OSSAccessKeyId=test&Signature=abc%2Fdef%3D';
+  const signedHttpsUrl =
+    'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav'
+    + '?Expires=1766113409&OSSAccessKeyId=test&Signature=abc%2Fdef%3D';
 
   await withServerEnvironment((async (input, init) => {
     requestUrl = String(input);
     requestInit = init;
     return jsonResponse({
-      output: { audio: { url: 'https://cdn.example.com/pronunciation.wav' } },
+      output: { audio: { url: signedHttpUrl } },
     });
   }) as typeof fetch, async (state) => {
     const result = await invokeHandler(synthesizePronunciation, {
@@ -608,14 +655,16 @@ test('synthesis uses default model and voice and returns an HTTPS audio URL', as
 
     assert.deepEqual(result, {
       status: 200,
-      body: { audioUrl: 'https://cdn.example.com/pronunciation.wav' },
+      body: { audioUrl: signedHttpsUrl },
     });
     assert.equal(requestUrl, DASH_SCOPE_MULTIMODAL_URL);
     assert.equal(state.acquireBodies.length, 1);
-    assert.equal(state.acquireBodies[0].p_resource_key, 'dashscope-tts');
-    assert.equal(state.acquireBodies[0].p_model_key, 'qwen3-tts-flash');
-    assert.equal(state.acquireBodies[0].p_global_per_second, 3);
-    assert.equal(state.acquireBodies[0].p_global_per_minute, 180);
+    assert.deepEqual(Object.keys(state.acquireBodies[0]).sort(), [
+      'p_ip_hash',
+      'p_operation',
+      'p_owner',
+    ]);
+    assert.equal(state.acquireBodies[0].p_operation, 'synthesis');
     const upstreamBody = JSON.parse(String(requestInit?.body));
     assert.deepEqual(upstreamBody, {
       model: 'qwen3-tts-flash',
@@ -628,18 +677,48 @@ test('synthesis uses default model and voice and returns an HTTPS audio URL', as
   });
 });
 
-test('synthesis rejects non-HTTPS upstream URLs without leaking them', async () => {
+test('synthesis accepts documented HTTPS DashScope OSS result hosts', async () => {
+  const signedUrl =
+    'https://dashscope-result-wlcb.oss-cn-wulanchabu.aliyuncs.com/audio.wav'
+    + '?Expires=1766116806&OSSAccessKeyId=test&Signature=signed';
+
   await withServerEnvironment((async () => jsonResponse({
-    output: { audio: { url: 'http://upstream-secret.example/audio.wav' } },
+    output: { audio: { url: signedUrl } },
   })) as typeof fetch, async () => {
-    const result = await invokeHandler(synthesizePronunciation, {
+    assert.deepEqual(await invokeHandler(synthesizePronunciation, {
       method: 'POST',
       body: { text: '中国' },
+    }), {
+      status: 200,
+      body: { audioUrl: signedUrl },
     });
-
-    assert.equal(result.status, 502);
-    assert.doesNotMatch(JSON.stringify(result.body), /upstream-secret/);
   });
+});
+
+test('synthesis rejects untrusted or malformed result URLs without leaking them', async () => {
+  const unsafeUrls = [
+    'https://cdn.example.com/pronunciation.wav',
+    'http://upstream-secret.example/audio.wav',
+    'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com.evil.example/audio.wav',
+    'https://evil.oss-cn-beijing.aliyuncs.com/audio.wav',
+    'https://user:password@dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav',
+    'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com:444/audio.wav',
+    'ftp://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav',
+  ];
+
+  for (const unsafeUrl of unsafeUrls) {
+    await withServerEnvironment((async () => jsonResponse({
+      output: { audio: { url: unsafeUrl } },
+    })) as typeof fetch, async () => {
+      const result = await invokeHandler(synthesizePronunciation, {
+        method: 'POST',
+        body: { text: '中国' },
+      });
+
+      assert.equal(result.status, 502, unsafeUrl);
+      assert.doesNotMatch(JSON.stringify(result.body), /upstream-secret|password/, unsafeUrl);
+    });
+  }
 });
 
 test('handlers reject non-POST requests before calling upstream', async () => {

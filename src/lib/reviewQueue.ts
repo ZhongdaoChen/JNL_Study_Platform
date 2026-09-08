@@ -22,15 +22,23 @@ export function applyReviewToQueue(
   updated: Word,
   opts: ApplyReviewToQueueOptions,
 ): Word[] {
+  const latestQueueEntry = queue.find((word) => word.id === updated.id);
+  const reconciled = latestQueueEntry
+    ? {
+        ...updated,
+        exampleSentence: latestQueueEntry.exampleSentence,
+        pronunciationExamples: latestQueueEntry.pronunciationExamples,
+      }
+    : updated;
   // 先同步队列里该词的所有副本（原位置 + 已排好的补做副本）为最新状态
-  const next = queue.map((w) => (w.id === updated.id ? updated : w));
+  const next = queue.map((w) => (w.id === updated.id ? reconciled : w));
   const pendingRetryCount = opts.spellingOnly
-    ? updated.spellingPendingRetryCount
-    : updated.pendingRetryCount;
+    ? reconciled.spellingPendingRetryCount
+    : reconciled.pendingRetryCount;
   if (pendingRetryCount <= 0) return next;
-  if (opts.isRetryAttempt) return [...next, updated];
+  if (opts.isRetryAttempt) return [...next, reconciled];
   const base = opts.gradedIndex >= 0 ? opts.gradedIndex : next.length - 1;
   const insertAt = Math.min(base + 1 + RETRY_GAP_WORDS, next.length);
-  next.splice(insertAt, 0, updated);
+  next.splice(insertAt, 0, reconciled);
   return next;
 }

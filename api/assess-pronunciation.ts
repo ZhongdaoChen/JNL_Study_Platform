@@ -84,16 +84,6 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return;
   }
 
-  await withPronunciationSecurity(req, res, 'assessment', (context) => (
-    handleAuthorizedAssessment(req, res, context)
-  ));
-}
-
-async function handleAuthorizedAssessment(
-  req: ApiRequest,
-  res: ApiResponse,
-  context: PronunciationSecurityContext,
-): Promise<void> {
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) {
     res.status(500).json({ error: '发音服务未配置' });
@@ -112,6 +102,17 @@ async function handleAuthorizedAssessment(
     return;
   }
 
+  await withPronunciationSecurity(req, res, 'assessment', (context) => (
+    handleAuthorizedAssessment(res, context, request, apiKey)
+  ));
+}
+
+async function handleAuthorizedAssessment(
+  res: ApiResponse,
+  context: PronunciationSecurityContext,
+  request: AudioRequest,
+  apiKey: string,
+): Promise<void> {
   try {
     const { response: asrResponse, data: asrData } = await context.fetchJson(
       DASH_SCOPE_MULTIMODAL_URL,

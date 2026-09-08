@@ -163,8 +163,8 @@ alter table user_settings enable row level security;
 alter table pronunciation_request_events enable row level security;
 alter table pronunciation_request_leases enable row level security;
 
-revoke all on table pronunciation_request_events from anon, authenticated;
-revoke all on table pronunciation_request_leases from anon, authenticated;
+revoke all on table pronunciation_request_events from public, anon, authenticated;
+revoke all on table pronunciation_request_leases from public, anon, authenticated;
 
 -- 辅助：判断某个 child 是否属于当前登录用户
 -- (用于子表策略；以 child_id 反查 children.owner)
@@ -182,21 +182,15 @@ $$;
 drop function if exists acquire_pronunciation_request(
   text, text, text, int, int, int, int, int, int
 );
+drop function if exists acquire_pronunciation_request(
+  text, text, text, text, text, int, int, int, int, int, int, int, int
+);
+drop function if exists release_pronunciation_request(uuid);
 
 create or replace function acquire_pronunciation_request(
-  p_scope text,
-  p_endpoint text,
-  p_ip_hash text,
-  p_resource_key text,
-  p_model_key text,
-  p_global_per_second int,
-  p_global_per_minute int,
-  p_window_seconds int,
-  p_principal_limit int,
-  p_ip_limit int,
-  p_principal_concurrency int,
-  p_ip_concurrency int,
-  p_lease_seconds int
+  p_owner uuid,
+  p_operation text,
+  p_ip_hash text
 )
 returns jsonb
 language plpgsql
@@ -204,8 +198,19 @@ security definer
 set search_path = public
 as $$
 declare
-  request_owner uuid := auth.uid();
-  request_time timestamptz := clock_timestamp();
+  request_time timestamptz;
+  policy_scope text := 'pronunciation';
+  endpoint_name text;
+  window_seconds int;
+  principal_limit int;
+  ip_limit int;
+  principal_concurrency int;
+  ip_concurrency int;
+  lease_seconds int;
+  policy_resource_key text;
+  policy_model_key text;
+  global_per_second int;
+  global_per_minute int;
   principal_requests int;
   ip_requests int;
   principal_active int;
@@ -214,65 +219,80 @@ declare
   global_minute_requests int;
   retry_after_seconds int;
   lease_id uuid;
+  lease_expires_at timestamptz;
 begin
-  if request_owner is null then
-    raise exception 'authentication required' using errcode = '28000';
+  if auth.role() is distinct from 'service_role' then
+    raise exception 'service role required' using errcode = '42501';
   end if;
-  if p_scope <> 'pronunciation'
-     or p_endpoint not in ('assessment', 'examples', 'synthesis')
-     or p_ip_hash !~ '^[0-9a-f]{64}$'
-     or p_window_seconds not between 1 and 3600
-     or p_principal_limit not between 1 and 600
-     or p_ip_limit not between 1 and 2000
-     or p_principal_concurrency not between 1 and 10
-     or p_ip_concurrency not between 1 and 50
-     or p_lease_seconds not between 5 and 120 then
-    raise exception 'invalid pronunciation limit parameters';
+  if p_owner is null or p_ip_hash !~ '^[0-9a-f]{64}$' then
+    raise exception 'invalid pronunciation limiter identity';
   end if;
 
-  if p_endpoint = 'synthesis' then
-    if nullif(trim(p_resource_key), '') is null
-       or char_length(p_resource_key) > 100
-       or nullif(trim(p_model_key), '') is null
-       or char_length(p_model_key) > 100
-       or coalesce(p_global_per_second, 0) not between 1 and 3
-       or coalesce(p_global_per_minute, 0) not between 1 and 180 then
-      raise exception 'invalid pronunciation global limit parameters';
-    end if;
+  case p_operation
+    when 'assessment' then
+      endpoint_name := 'assessment';
+      window_seconds := 60;
+      principal_limit := 30;
+      ip_limit := 90;
+      principal_concurrency := 2;
+      ip_concurrency := 6;
+      lease_seconds := 30;
+    when 'examples' then
+      endpoint_name := 'examples';
+      window_seconds := 60;
+      principal_limit := 30;
+      ip_limit := 90;
+      principal_concurrency := 2;
+      ip_concurrency := 6;
+      lease_seconds := 30;
+    when 'synthesis' then
+      endpoint_name := 'synthesis';
+      window_seconds := 60;
+      principal_limit := 30;
+      ip_limit := 90;
+      principal_concurrency := 2;
+      ip_concurrency := 6;
+      lease_seconds := 30;
+      policy_resource_key := 'dashscope-tts';
+      policy_model_key := 'qwen3-tts-flash';
+      global_per_second := 3;
+      global_per_minute := 180;
+    else
+      raise exception 'invalid pronunciation operation';
+  end case;
+
+  if policy_resource_key is not null then
     perform pg_advisory_xact_lock(
       hashtextextended(
-        'pronunciation:global:' || p_resource_key || ':' || p_model_key,
+        'pronunciation:global:' || policy_resource_key || ':' || policy_model_key,
         0
       )
     );
-  elsif p_resource_key is not null
-        or p_model_key is not null
-        or coalesce(p_global_per_second, 0) <> 0
-        or coalesce(p_global_per_minute, 0) <> 0 then
-    raise exception 'global limit parameters only apply to synthesis';
   end if;
 
   perform pg_advisory_xact_lock(
-    hashtextextended('pronunciation:user:' || request_owner::text, 0)
+    hashtextextended('pronunciation:user:' || p_owner::text, 0)
   );
   perform pg_advisory_xact_lock(
     hashtextextended('pronunciation:ip:' || p_ip_hash, 0)
   );
+
+  request_time := clock_timestamp();
 
   delete from pronunciation_request_leases
   where expires_at <= request_time;
   delete from pronunciation_request_events
   where created_at < request_time - interval '1 day';
 
-  if p_endpoint = 'synthesis' then
+  if policy_resource_key is not null then
     select count(*)::int
     into global_second_requests
     from pronunciation_request_events
-    where resource_key = p_resource_key
-      and model_key = p_model_key
+    where resource_key = policy_resource_key
+      and model_key = policy_model_key
       and created_at > request_time - interval '1 second';
 
-    if global_second_requests >= p_global_per_second then
+    if global_second_requests >= global_per_second then
       select greatest(
         1,
         ceil(extract(epoch from (
@@ -281,8 +301,8 @@ begin
       )
       into retry_after_seconds
       from pronunciation_request_events
-      where resource_key = p_resource_key
-        and model_key = p_model_key
+      where resource_key = policy_resource_key
+        and model_key = policy_model_key
         and created_at > request_time - interval '1 second';
 
       return jsonb_build_object(
@@ -295,11 +315,11 @@ begin
     select count(*)::int
     into global_minute_requests
     from pronunciation_request_events
-    where resource_key = p_resource_key
-      and model_key = p_model_key
+    where resource_key = policy_resource_key
+      and model_key = policy_model_key
       and created_at > request_time - interval '1 minute';
 
-    if global_minute_requests >= p_global_per_minute then
+    if global_minute_requests >= global_per_minute then
       select greatest(
         1,
         ceil(extract(epoch from (
@@ -308,8 +328,8 @@ begin
       )
       into retry_after_seconds
       from pronunciation_request_events
-      where resource_key = p_resource_key
-        and model_key = p_model_key
+      where resource_key = policy_resource_key
+        and model_key = policy_model_key
         and created_at > request_time - interval '1 minute';
 
       return jsonb_build_object(
@@ -323,22 +343,22 @@ begin
   select count(*)::int
   into principal_requests
   from pronunciation_request_events
-  where owner = request_owner
-    and request_scope = p_scope
-    and created_at > request_time - make_interval(secs => p_window_seconds);
+  where owner = p_owner
+    and request_scope = policy_scope
+    and created_at > request_time - make_interval(secs => window_seconds);
 
-  if principal_requests >= p_principal_limit then
+  if principal_requests >= principal_limit then
     select greatest(
       1,
       ceil(extract(epoch from (
-        min(created_at) + make_interval(secs => p_window_seconds) - request_time
+        min(created_at) + make_interval(secs => window_seconds) - request_time
       )))::int
     )
     into retry_after_seconds
     from pronunciation_request_events
-    where owner = request_owner
-      and request_scope = p_scope
-      and created_at > request_time - make_interval(secs => p_window_seconds);
+    where owner = p_owner
+      and request_scope = policy_scope
+      and created_at > request_time - make_interval(secs => window_seconds);
 
     return jsonb_build_object(
       'allowed', false,
@@ -351,21 +371,21 @@ begin
   into ip_requests
   from pronunciation_request_events
   where ip_hash = p_ip_hash
-    and request_scope = p_scope
-    and created_at > request_time - make_interval(secs => p_window_seconds);
+    and request_scope = policy_scope
+    and created_at > request_time - make_interval(secs => window_seconds);
 
-  if ip_requests >= p_ip_limit then
+  if ip_requests >= ip_limit then
     select greatest(
       1,
       ceil(extract(epoch from (
-        min(created_at) + make_interval(secs => p_window_seconds) - request_time
+        min(created_at) + make_interval(secs => window_seconds) - request_time
       )))::int
     )
     into retry_after_seconds
     from pronunciation_request_events
     where ip_hash = p_ip_hash
-      and request_scope = p_scope
-      and created_at > request_time - make_interval(secs => p_window_seconds);
+      and request_scope = policy_scope
+      and created_at > request_time - make_interval(secs => window_seconds);
 
     return jsonb_build_object(
       'allowed', false,
@@ -377,28 +397,28 @@ begin
   select count(*)::int
   into principal_active
   from pronunciation_request_leases
-  where owner = request_owner
-    and request_scope = p_scope
+  where owner = p_owner
+    and request_scope = policy_scope
     and expires_at > request_time;
 
   select count(*)::int
   into ip_active
   from pronunciation_request_leases
   where ip_hash = p_ip_hash
-    and request_scope = p_scope
+    and request_scope = policy_scope
     and expires_at > request_time;
 
-  if principal_active >= p_principal_concurrency
-     or ip_active >= p_ip_concurrency then
+  if principal_active >= principal_concurrency
+     or ip_active >= ip_concurrency then
     select greatest(
       1,
       ceil(extract(epoch from (min(expires_at) - request_time)))::int
     )
     into retry_after_seconds
     from pronunciation_request_leases
-    where request_scope = p_scope
+    where request_scope = policy_scope
       and expires_at > request_time
-      and (owner = request_owner or ip_hash = p_ip_hash);
+      and (owner = p_owner or ip_hash = p_ip_hash);
 
     return jsonb_build_object(
       'allowed', false,
@@ -417,14 +437,16 @@ begin
     created_at
   )
   values (
-    request_owner,
+    p_owner,
     p_ip_hash,
-    p_scope,
-    p_endpoint,
-    p_resource_key,
-    p_model_key,
+    policy_scope,
+    endpoint_name,
+    policy_resource_key,
+    policy_model_key,
     request_time
   );
+
+  lease_expires_at := request_time + make_interval(secs => lease_seconds);
 
   insert into pronunciation_request_leases(
     owner,
@@ -434,40 +456,53 @@ begin
     expires_at
   )
   values (
-    request_owner,
+    p_owner,
     p_ip_hash,
-    p_scope,
-    p_endpoint,
-    request_time + make_interval(secs => p_lease_seconds)
+    policy_scope,
+    endpoint_name,
+    lease_expires_at
   )
   returning id into lease_id;
 
   return jsonb_build_object(
     'allowed', true,
     'lease_id', lease_id,
+    'granted_at', request_time,
+    'expires_at', lease_expires_at,
     'retry_after_seconds', 0
   );
 end;
 $$;
 
-create or replace function release_pronunciation_request(p_lease_id uuid)
+create or replace function release_pronunciation_request(
+  p_owner uuid,
+  p_lease_id uuid
+)
 returns void
-language sql
+language plpgsql
 security definer
 set search_path = public
 as $$
+begin
+  if auth.role() is distinct from 'service_role' then
+    raise exception 'service role required' using errcode = '42501';
+  end if;
+
   delete from pronunciation_request_leases
-  where id = p_lease_id and owner = auth.uid();
+  where id = p_lease_id and owner = p_owner;
+end;
 $$;
 
 revoke all on function acquire_pronunciation_request(
-  text, text, text, text, text, int, int, int, int, int, int, int, int
-) from public;
-revoke all on function release_pronunciation_request(uuid) from public;
+  uuid, text, text
+) from public, anon, authenticated;
+revoke all on function release_pronunciation_request(uuid, uuid)
+  from public, anon, authenticated;
 grant execute on function acquire_pronunciation_request(
-  text, text, text, text, text, int, int, int, int, int, int, int, int
-) to authenticated;
-grant execute on function release_pronunciation_request(uuid) to authenticated;
+  uuid, text, text
+) to service_role;
+grant execute on function release_pronunciation_request(uuid, uuid)
+  to service_role;
 
 -- children：只能操作自己拥有的
 drop policy if exists children_all on children;
