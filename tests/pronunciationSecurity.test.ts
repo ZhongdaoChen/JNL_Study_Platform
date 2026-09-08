@@ -398,6 +398,144 @@ test('the fourth global TTS start in one second is rejected across principals an
   });
 });
 
+test('the second Omni assessment start in one second is rejected across principals and recovers', async () => {
+  let nowMs = 0;
+  const omniStarts: number[] = [];
+  const acquireBodies: Record<string, unknown>[] = [];
+  let leaseSequence = 0;
+
+  await withSecurityEnvironment((async (input, init) => {
+    const url = String(input);
+    if (url.endsWith('/auth/v1/user')) {
+      const authorization = (init?.headers as Record<string, string>).Authorization;
+      return new Response(JSON.stringify({ id: authorization.replace('Bearer ', '') }), {
+        status: 200,
+      });
+    }
+    if (url.endsWith('/rest/v1/rpc/acquire_pronunciation_request')) {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      acquireBodies.push(body);
+      if (body.p_operation === 'omni_assessment') {
+        const oneSecondStarts = omniStarts.filter((startedAt) => nowMs - startedAt < 1_000);
+        const oneMinuteStarts = omniStarts.filter((startedAt) => nowMs - startedAt < 60_000);
+        if (oneSecondStarts.length >= 1 || oneMinuteStarts.length >= 60) {
+          return new Response(JSON.stringify({
+            allowed: false,
+            reason: 'global_rate_limit',
+            retry_after_seconds: 1,
+          }), { status: 200 });
+        }
+        omniStarts.push(nowMs);
+      }
+      leaseSequence += 1;
+      return new Response(JSON.stringify(allowedLease(`lease-${leaseSequence}`)), {
+        status: 200,
+      });
+    }
+    if (url.endsWith('/rest/v1/rpc/release_pronunciation_request')) {
+      return new Response('null', { status: 200 });
+    }
+    return new Response(null, { status: 404 });
+  }) as typeof fetch, async () => {
+    async function attempt(index: number): Promise<ResponseResult & { worked: boolean }> {
+      const { response, result } = createResponse();
+      let worked = false;
+      await withPronunciationSecurity(
+        request(`user-${index}`, `203.0.113.${index}`),
+        response,
+        'assessment',
+        async (context) => {
+          await context.withProviderGate('omni_assessment', async () => {
+            worked = true;
+          });
+        },
+      );
+      return { ...result, worked };
+    }
+
+    const first = await attempt(1);
+    assert.equal(first.status, 200);
+    assert.equal(first.worked, true);
+
+    const denied = await attempt(2);
+    assert.equal(denied.status, 429);
+    assert.equal(denied.headers['Retry-After'], '1');
+    assert.equal(denied.worked, false);
+
+    nowMs = 1_001;
+    const recovered = await attempt(3);
+    assert.equal(recovered.status, 200);
+    assert.equal(recovered.worked, true);
+
+    assert.deepEqual(
+      acquireBodies.map((body) => body.p_operation),
+      [
+        'assessment',
+        'omni_assessment',
+        'assessment',
+        'omni_assessment',
+        'assessment',
+        'omni_assessment',
+      ],
+    );
+    for (const body of acquireBodies) {
+      assert.deepEqual(Object.keys(body).sort(), [
+        'p_ip_hash',
+        'p_operation',
+        'p_owner',
+      ]);
+    }
+  });
+});
+
+test('an Omni gate with insufficient remaining lease time releases both leases before work starts', async () => {
+  const releasedLeaseIds: string[] = [];
+  await withSecurityEnvironment((async (input, init) => {
+    const url = String(input);
+    if (url.endsWith('/auth/v1/user')) {
+      return new Response(JSON.stringify({ id: 'user-1' }), { status: 200 });
+    }
+    if (url.endsWith('/rest/v1/rpc/acquire_pronunciation_request')) {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (body.p_operation === 'omni_assessment') {
+        return new Response(JSON.stringify(
+          allowedLease('omni-lease', Date.now() - 29_500),
+        ), { status: 200 });
+      }
+      return new Response(JSON.stringify(allowedLease('assessment-lease')), {
+        status: 200,
+      });
+    }
+    if (url.endsWith('/rest/v1/rpc/release_pronunciation_request')) {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      releasedLeaseIds.push(String(body.p_lease_id));
+      return new Response('null', { status: 200 });
+    }
+    return new Response(null, { status: 404 });
+  }) as typeof fetch, async () => {
+    const { response, result } = createResponse();
+    let omniWorkCalled = false;
+
+    await withPronunciationSecurity(
+      request(),
+      response,
+      'assessment',
+      async (context) => {
+        await context.withProviderGate('omni_assessment', async () => {
+          omniWorkCalled = true;
+        });
+      },
+    );
+
+    assert.equal(result.status, 503);
+    assert.deepEqual(result.body, {
+      error: '语音服务访问控制租约不足，请稍后重试',
+    });
+    assert.equal(omniWorkCalled, false);
+    assert.deepEqual(releasedLeaseIds, ['omni-lease', 'assessment-lease']);
+  });
+});
+
 test('concurrency lease is released even when protected work throws', async () => {
   const rpcCalls: string[] = [];
   await withSecurityEnvironment((async (input) => {

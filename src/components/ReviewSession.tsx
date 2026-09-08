@@ -17,6 +17,13 @@ import {
   mergeExampleSentenceInQueue,
   mergePronunciationExamplesInQueue,
 } from './pronunciationSession';
+import {
+  createReviewGradeCoordinator,
+  resetReviewGradeCoordinatorForWord,
+  reviewGradeAvailability,
+  submitCoordinatedReviewGrade,
+  type ReviewGradeSource,
+} from './reviewGradeSession';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
 export default function ReviewSession({ childId, lang, spellingOnly, countdownSec, dailyLimit, onChanged }: {
@@ -46,6 +53,9 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   const remainRef = useRef(0);
   const exampleRequestRef = useRef(0);
   const imageRequestRef = useRef(0);
+  const gradeCoordinatorRef = useRef(createReviewGradeCoordinator());
+  const currentWordIdRef = useRef<string | null>(null);
+  const [, refreshGradeActions] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -73,6 +83,18 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   }, [childId, lang, spellingOnly, dailyLimit]);
 
   const current = queue[idx];
+  currentWordIdRef.current = current?.id ?? null;
+
+  useEffect(() => {
+    if (
+      resetReviewGradeCoordinatorForWord(
+        gradeCoordinatorRef.current,
+        current?.id ?? null,
+      )
+    ) {
+      refreshGradeActions((version) => version + 1);
+    }
+  }, [current?.id]);
 
   function clearExampleImage() {
     imageRequestRef.current += 1;
@@ -82,7 +104,9 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   }
 
   // 始终持有最新的 grade，供倒计时回调调用（避免把 grade 放进定时器依赖导致重置）
-  const gradeRef = useRef<(g: Grade, advance?: boolean) => void>(() => {});
+  const gradeRef = useRef<(g: Grade, advance?: boolean) => Promise<void>>(
+    async () => {},
+  );
 
   // 切换词或修改配置时重置倒计时。首次手动启动前，新词继续保持暂停。
   useEffect(() => {
@@ -108,7 +132,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         window.clearInterval(id);
         remainRef.current = 0;
         setRemainMs(0);
-        gradeRef.current('forgotten', false);
+        void gradeRef.current('forgotten', false).catch(() => {});
       } else {
         remainRef.current = left;
         setRemainMs(left);
@@ -117,40 +141,91 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     return () => window.clearInterval(id);
   }, [current?.id, countdownSec, isPaused]);
 
-  // 乐观更新：默认先切到下一张卡，保存放后台执行，失败再提示；advance=false 时停留在当前词
-  function grade(g: Grade, advance = true) {
+  // 手动评分保持乐观切换；语音自动评分等待保存成功后再更新当前卡片。
+  async function grade(
+    g: Grade,
+    advance = true,
+    source: ReviewGradeSource = 'manual',
+    advanceAfterMs = 0,
+  ): Promise<void> {
     if (!current) return;
+    const target = current;
+    const automaticGradeStartedAt = Date.now();
+
     const todayStr = today();
     const isRetryAttempt = spellingOnly
-      ? current.spellingPendingRetryCount > 0 && current.spellingDueDate <= todayStr
-      : current.pendingRetryCount > 0 && current.dueDate <= todayStr;
-    setDoneCount((c) => c + 1);
-    setShowExample(false);
-    setGenError(null);
-    exampleRequestRef.current += 1;
-    clearExampleImage();
-    setPrefetchedWordId(null);
-    setSaveError(null);
-    if (advance) setIdx((i) => i + 1);
-    submitReview(repo, current, g, spellingOnly, isRetryAttempt)
-      .then((updated) => {
-        // 补做排队规则见 reviewQueue.ts：首次彻底陌生的补做插到约 10 个词后，
-        // 补做时再评分则把剩余补做追加到队尾
-        setQueue((q) => applyReviewToQueue(q, updated, {
-          spellingOnly,
-          isRetryAttempt,
-          gradedIndex: q.findIndex((w) => w.id === updated.id),
-        }));
-        onChanged();
-      })
-      .catch((e: unknown) => {
-        setSaveError(`「${current.text}」保存失败：${errorMessage(e, '请检查网络')}`);
-      });
+      ? target.spellingPendingRetryCount > 0 && target.spellingDueDate <= todayStr
+      : target.pendingRetryCount > 0 && target.dueDate <= todayStr;
+    const applyGradeUi = (shouldAdvance: boolean) => {
+      setDoneCount((c) => c + 1);
+      setShowExample(false);
+      setGenError(null);
+      exampleRequestRef.current += 1;
+      clearExampleImage();
+      setPrefetchedWordId(null);
+      setSaveError(null);
+      if (shouldAdvance) setIdx((i) => i + 1);
+    };
+
+    try {
+      await submitCoordinatedReviewGrade(
+        gradeCoordinatorRef.current,
+        {
+          wordId: target.id,
+          source,
+          advance,
+        },
+        () => submitReview(repo, target, g, spellingOnly, isRetryAttempt),
+        async (updated) => {
+          if (source === 'voice' && advance && advanceAfterMs > 0) {
+            const remainingDelayMs = Math.max(
+              0,
+              advanceAfterMs - (Date.now() - automaticGradeStartedAt),
+            );
+            if (remainingDelayMs > 0) {
+              await new Promise<void>((resolve) => {
+                window.setTimeout(resolve, remainingDelayMs);
+              });
+            }
+          }
+          // 补做排队规则见 reviewQueue.ts：首次彻底陌生的补做插到约 10 个词后，
+          // 补做时再评分则把剩余补做追加到队尾
+          setQueue((q) => applyReviewToQueue(q, updated, {
+            spellingOnly,
+            isRetryAttempt,
+            gradedIndex: q.findIndex((w) => w.id === updated.id),
+          }));
+          if (source === 'voice') {
+            applyGradeUi(
+              advance && currentWordIdRef.current === target.id,
+            );
+          }
+          onChanged();
+        },
+        () => refreshGradeActions((version) => version + 1),
+        () => {
+          setSaveError(null);
+          if (source === 'manual') applyGradeUi(advance);
+        },
+      );
+    } catch (e: unknown) {
+      setSaveError(`「${target.text}」保存失败：${errorMessage(e, '请检查网络')}`);
+      if (source === 'voice') throw e;
+    }
   }
   gradeRef.current = grade;
 
   // 在队列中前后切换，不评分
   function goTo(i: number) {
+    if (
+      current
+      && reviewGradeAvailability(
+        gradeCoordinatorRef.current,
+        current.id,
+      ).conflictingActionsDisabled
+    ) {
+      return;
+    }
     setShowExample(false);
     setGenError(null);
     exampleRequestRef.current += 1;
@@ -232,6 +307,14 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   // - 读模式仍是真删除：从数据库移除，不可恢复。
   async function deleteCurrent() {
     if (!current) return;
+    if (
+      reviewGradeAvailability(
+        gradeCoordinatorRef.current,
+        current.id,
+      ).conflictingActionsDisabled
+    ) {
+      return;
+    }
     const target = current;
     if (spellingOnly) {
       const spellModeName = lang === 'zh' ? '会写' : '拼写';
@@ -279,7 +362,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
 
   function gradeFromButton(g: Grade, button: HTMLButtonElement) {
     releaseReviewActionFocus(button);
-    grade(g);
+    void grade(g);
   }
 
   useEffect(() => {
@@ -289,11 +372,17 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         code: event.code,
         target: event.target,
         repeat: event.repeat,
-        hasCurrentWord: Boolean(current),
+        hasCurrentWord: Boolean(current) && !(
+          current
+          && reviewGradeAvailability(
+            gradeCoordinatorRef.current,
+            current.id,
+          ).manualGradeDisabled
+        ),
       });
       if (shortcutGrade) {
         event.preventDefault();
-        gradeRef.current(shortcutGrade);
+        void gradeRef.current(shortcutGrade);
         return;
       }
 
@@ -344,6 +433,10 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     );
   }
 
+  const gradeAvailability = reviewGradeAvailability(
+    gradeCoordinatorRef.current,
+    current.id,
+  );
   const action = spellingOnly
     ? lang === 'zh'
       ? '让孩子写出这个字'
@@ -367,6 +460,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         <button
           className="review-icon-btn review-del-btn"
           onClick={deleteCurrent}
+          disabled={gradeAvailability.conflictingActionsDisabled}
           title={spellingOnly ? `移出${modeLabel}队列（词会保留）` : `删除该${unit}`}
           aria-label={spellingOnly ? `移出${modeLabel}队列（词会保留）` : `删除该${unit}`}
         >
@@ -380,7 +474,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         <button
           className="word-arrow"
           onClick={() => goTo(idx - 1)}
-          disabled={idx === 0}
+          disabled={idx === 0 || gradeAvailability.conflictingActionsDisabled}
           title="上一个"
           aria-label="上一个"
         >
@@ -404,7 +498,9 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
                   );
                 });
               }}
-              onVoiceGrade={(voiceGrade, advance) => grade(voiceGrade, advance)}
+              onVoiceGrade={(voiceGrade, advance, advanceAfterMs) => (
+                grade(voiceGrade, advance, 'voice', advanceAfterMs)
+              )}
             />
           )}
 
@@ -444,7 +540,10 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         <button
           className="word-arrow"
           onClick={() => goTo(idx + 1)}
-          disabled={idx >= queue.length - 1}
+          disabled={
+            idx >= queue.length - 1
+            || gradeAvailability.conflictingActionsDisabled
+          }
           title="下一个"
           aria-label="下一个"
         >
@@ -472,24 +571,28 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         <button
           className="g-instant"
           onClick={(event) => gradeFromButton('instant', event.currentTarget)}
+          disabled={gradeAvailability.manualGradeDisabled}
         >
           A · {instantLabel}
         </button>
         <button
           className="g-mastered"
           onClick={(event) => gradeFromButton('mastered', event.currentTarget)}
+          disabled={gradeAvailability.manualGradeDisabled}
         >
           S · {GRADE_LABELS.mastered}
         </button>
         <button
           className="g-fuzzy"
           onClick={(event) => gradeFromButton('fuzzy', event.currentTarget)}
+          disabled={gradeAvailability.manualGradeDisabled}
         >
           D · {GRADE_LABELS.fuzzy}
         </button>
         <button
           className="g-forgotten"
           onClick={(event) => gradeFromButton('forgotten', event.currentTarget)}
+          disabled={gradeAvailability.manualGradeDisabled}
         >
           F · {GRADE_LABELS.forgotten}
         </button>

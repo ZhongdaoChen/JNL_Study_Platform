@@ -36,10 +36,50 @@ interface HandlerResult {
 interface ServerEnvironmentState {
   releaseCalls: number;
   acquireBodies: Record<string, unknown>[];
+  events: string[];
 }
 
-const MIN_AUDIO_BYTES = 256;
-const VALID_AUDIO_BASE64 = Buffer.alloc(MIN_AUDIO_BYTES, 1).toString('base64');
+interface PcmWavOptions {
+  sampleRate?: number;
+  channelCount?: number;
+  bitsPerSample?: number;
+  audioFormat?: number;
+  byteRate?: number;
+  blockAlign?: number;
+  dataBytes?: number;
+}
+
+function pcmWavBuffer(
+  durationMs: number,
+  {
+    sampleRate = 16_000,
+    channelCount = 1,
+    bitsPerSample = 16,
+    audioFormat = 1,
+    byteRate = sampleRate * channelCount * (bitsPerSample / 8),
+    blockAlign = channelCount * (bitsPerSample / 8),
+    dataBytes = Math.floor((byteRate * durationMs) / 1_000),
+  }: PcmWavOptions = {},
+): Buffer {
+  const paddedDataBytes = dataBytes + (dataBytes % 2);
+  const audio = Buffer.alloc(44 + paddedDataBytes);
+  audio.write('RIFF', 0, 'ascii');
+  audio.writeUInt32LE(36 + paddedDataBytes, 4);
+  audio.write('WAVE', 8, 'ascii');
+  audio.write('fmt ', 12, 'ascii');
+  audio.writeUInt32LE(16, 16);
+  audio.writeUInt16LE(audioFormat, 20);
+  audio.writeUInt16LE(channelCount, 22);
+  audio.writeUInt32LE(sampleRate, 24);
+  audio.writeUInt32LE(byteRate, 28);
+  audio.writeUInt16LE(blockAlign, 32);
+  audio.writeUInt16LE(bitsPerSample, 34);
+  audio.write('data', 36, 'ascii');
+  audio.writeUInt32LE(dataBytes, 40);
+  return audio;
+}
+
+const VALID_AUDIO_BASE64 = pcmWavBuffer(250).toString('base64');
 
 async function invokeHandler(handler: Handler, req: HandlerRequest): Promise<HandlerResult> {
   const result: HandlerResult = { status: 200, body: undefined };
@@ -115,18 +155,25 @@ async function withServerEnvironment(
   const originalRateSecret = process.env.PRONUNCIATION_RATE_LIMIT_SECRET;
   const originalSecurityTimeout = process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS;
   const originalUpstreamTimeout = process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS;
-  const state: ServerEnvironmentState = { releaseCalls: 0, acquireBodies: [] };
+  const state: ServerEnvironmentState = {
+    releaseCalls: 0,
+    acquireBodies: [],
+    events: [],
+  };
   globalThis.fetch = (async (input, init) => {
     const url = String(input);
     if (url === 'https://project.supabase.co/auth/v1/user') {
+      state.events.push('auth');
       return jsonResponse({ id: 'user-1' });
     }
     if (url === 'https://project.supabase.co/rest/v1/rpc/acquire_pronunciation_request') {
-      state.acquireBodies.push(JSON.parse(String(init?.body)));
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      state.acquireBodies.push(body);
+      state.events.push(`acquire:${String(body.p_operation)}`);
       const grantedAt = Date.now();
       return jsonResponse({
         allowed: true,
-        lease_id: '11111111-1111-4111-8111-111111111111',
+        lease_id: `${state.acquireBodies.length}1111111-1111-4111-8111-111111111111`,
         granted_at: new Date(grantedAt).toISOString(),
         expires_at: new Date(grantedAt + 30_000).toISOString(),
         retry_after_seconds: 0,
@@ -134,8 +181,16 @@ async function withServerEnvironment(
     }
     if (url === 'https://project.supabase.co/rest/v1/rpc/release_pronunciation_request') {
       state.releaseCalls += 1;
+      state.events.push('release');
       return jsonResponse(null);
     }
+    state.events.push(
+      url === DASH_SCOPE_MULTIMODAL_URL
+        ? 'provider:asr'
+        : url === DASH_SCOPE_CHAT_COMPLETIONS_URL
+          ? 'provider:omni'
+          : `provider:${url}`,
+    );
     return fetchImplementation(input, init);
   }) as typeof fetch;
   process.env.QWEN_API_KEY = 'server-test-key';
@@ -176,6 +231,7 @@ test('every protected DashScope fetch aborts before lease expiry and releases it
     handler: Handler;
     body: Record<string, unknown>;
     expectedError: string;
+    expectedReleaseCalls: number;
     fetchImplementation: typeof fetch;
   }[] = [
     {
@@ -183,6 +239,7 @@ test('every protected DashScope fetch aborts before lease expiry and releases it
       handler: assessPronunciation,
       body: { target: '中国', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
       expectedError: '发音评估超时，请稍后重试',
+      expectedReleaseCalls: 1,
       fetchImplementation: (async (_input, init) => hangsUntilAborted(init, () => {})) as typeof fetch,
     },
     {
@@ -190,6 +247,7 @@ test('every protected DashScope fetch aborts before lease expiry and releases it
       handler: assessPronunciation,
       body: { target: '中', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
       expectedError: '发音评估超时，请稍后重试',
+      expectedReleaseCalls: 2,
       fetchImplementation: (async (input, init) => {
         if (String(input) === DASH_SCOPE_MULTIMODAL_URL) {
           return jsonResponse({
@@ -207,6 +265,7 @@ test('every protected DashScope fetch aborts before lease expiry and releases it
       handler: generatePronunciationExamples,
       body: { character: '中' },
       expectedError: '辅助词生成超时，请稍后重试',
+      expectedReleaseCalls: 1,
       fetchImplementation: (async (_input, init) => hangsUntilAborted(init, () => {})) as typeof fetch,
     },
     {
@@ -214,6 +273,7 @@ test('every protected DashScope fetch aborts before lease expiry and releases it
       handler: synthesizePronunciation,
       body: { text: '中' },
       expectedError: '语音合成超时，请稍后重试',
+      expectedReleaseCalls: 1,
       fetchImplementation: (async (_input, init) => hangsUntilAborted(init, () => {})) as typeof fetch,
     },
   ];
@@ -239,7 +299,7 @@ test('every protected DashScope fetch aborts before lease expiry and releases it
         testCase.name,
       );
       assert.equal(aborted, true, testCase.name);
-      assert.equal(state.releaseCalls, 1, testCase.name);
+      assert.equal(state.releaseCalls, testCase.expectedReleaseCalls, testCase.name);
       assert.ok(Date.now() - startedAt < 1_000, testCase.name);
     });
   }
@@ -319,36 +379,112 @@ test('validateAudioRequest rejects unsupported MIME types and invalid base64', (
   assert.throws(
     () => validateAudioRequest({
       target: '中',
-      mimeType: 'audio/webm',
+      mimeType: 'audio/wav',
       audioBase64: 'not base64!',
     }),
     /音频数据/,
   );
 });
 
-test('validateAudioRequest rejects decoded audio below the conservative minimum', () => {
-  assert.throws(
-    () => validateAudioRequest({
-      target: '中',
-      mimeType: 'audio/webm',
-      audioBase64: Buffer.alloc(MIN_AUDIO_BYTES - 1).toString('base64'),
-    }),
-    /音频太短/,
-  );
-});
-
-test('validateAudioRequest accepts decoded audio at the conservative minimum', () => {
+test('validateAudioRequest accepts only normalized PCM WAV uploads', () => {
   assert.deepEqual(
     validateAudioRequest({
       target: '中',
-      mimeType: 'audio/webm',
+      mimeType: 'audio/wav',
       audioBase64: VALID_AUDIO_BASE64,
     }),
     {
       target: '中',
-      mimeType: 'audio/webm',
+      mimeType: 'audio/wav',
       audioBase64: VALID_AUDIO_BASE64,
     },
+  );
+  assert.throws(
+    () => validateAudioRequest({
+      target: '中',
+      mimeType: 'audio/webm',
+      audioBase64: VALID_AUDIO_BASE64,
+    }),
+    /音频格式/,
+  );
+});
+
+test('validateAudioRequest rejects spoofed, truncated, and inconsistent WAV containers', () => {
+  const valid = pcmWavBuffer(250);
+  const malformed = [
+    Buffer.alloc(valid.length, 1),
+    Buffer.from(valid),
+    Buffer.from(valid),
+    Buffer.from(valid),
+    Buffer.from(valid),
+    valid.subarray(0, valid.length - 1),
+  ];
+  malformed[1].write('NOPE', 0, 'ascii');
+  malformed[2].write('NOPE', 8, 'ascii');
+  malformed[3].writeUInt32LE(valid.length, 4);
+  malformed[4].write('JUNK', 36, 'ascii');
+
+  for (const audio of malformed) {
+    assert.throws(
+      () => validateAudioRequest({
+        target: '中',
+        mimeType: 'audio/wav',
+        audioBase64: audio.toString('base64'),
+      }),
+      /WAV|音频数据/,
+    );
+  }
+});
+
+test('validateAudioRequest enforces mono 16-bit PCM and sample-rate metadata', () => {
+  const unsupported = [
+    pcmWavBuffer(250, { audioFormat: 3 }),
+    pcmWavBuffer(250, { channelCount: 2 }),
+    pcmWavBuffer(250, { bitsPerSample: 8 }),
+    pcmWavBuffer(250, { sampleRate: 7_999 }),
+    pcmWavBuffer(250, { sampleRate: 48_001 }),
+    pcmWavBuffer(250, { byteRate: 1 }),
+    pcmWavBuffer(250, { blockAlign: 1 }),
+  ];
+
+  for (const audio of unsupported) {
+    assert.throws(
+      () => validateAudioRequest({
+        target: '中',
+        mimeType: 'audio/wav',
+        audioBase64: audio.toString('base64'),
+      }),
+      /PCM WAV/,
+    );
+  }
+});
+
+test('validateAudioRequest derives duration from WAV data bytes at both boundaries', () => {
+  assert.throws(
+    () => validateAudioRequest({
+      target: '中',
+      mimeType: 'audio/wav',
+      audioBase64: pcmWavBuffer(249).toString('base64'),
+    }),
+    /音频太短/,
+  );
+  assert.doesNotThrow(() => validateAudioRequest({
+    target: '中',
+    mimeType: 'audio/wav',
+    audioBase64: pcmWavBuffer(250).toString('base64'),
+  }));
+  assert.doesNotThrow(() => validateAudioRequest({
+    target: '中',
+    mimeType: 'audio/wav',
+    audioBase64: pcmWavBuffer(6_000).toString('base64'),
+  }));
+  assert.throws(
+    () => validateAudioRequest({
+      target: '中',
+      mimeType: 'audio/wav',
+      audioBase64: pcmWavBuffer(6_001).toString('base64'),
+    }),
+    /6 秒/,
   );
 });
 
@@ -356,40 +492,16 @@ test('validateAudioRequest rejects decoded audio larger than 1 MB', () => {
   assert.throws(
     () => validateAudioRequest({
       target: '中',
-      mimeType: 'audio/webm',
+      mimeType: 'audio/wav',
       audioBase64: Buffer.alloc(1_000_001).toString('base64'),
     }),
     /1 MB/,
   );
 });
 
-test('validateAudioRequest accepts all supported browser audio types', () => {
-  for (const mimeType of [
-    'audio/webm',
-    'audio/webm;codecs=opus',
-    'audio/mp4',
-    'audio/ogg',
-    'audio/ogg;codecs=opus',
-    'audio/wav',
-  ]) {
-    assert.deepEqual(
-      validateAudioRequest({
-        target: ' 中国。 ',
-        mimeType,
-        audioBase64: VALID_AUDIO_BASE64,
-      }),
-      { target: '中国。', mimeType, audioBase64: VALID_AUDIO_BASE64 },
-    );
-  }
-});
-
-test('browser MIME types map to the documented Qwen Audio ASR format values', () => {
-  assert.equal(audioFormatForMimeType('audio/webm'), 'webm');
-  assert.equal(audioFormatForMimeType('audio/webm;codecs=opus'), 'webm');
-  assert.equal(audioFormatForMimeType('audio/mp4'), 'mp4');
-  assert.equal(audioFormatForMimeType('audio/ogg'), 'ogg');
-  assert.equal(audioFormatForMimeType('audio/ogg;codecs=opus'), 'ogg');
+test('server audio MIME maps only normalized WAV to the provider format', () => {
   assert.equal(audioFormatForMimeType('audio/wav'), 'wav');
+  assert.throws(() => audioFormatForMimeType('audio/webm'), /音频格式/);
 });
 
 test('example validation requires a single Han character', () => {
@@ -421,6 +533,22 @@ test('invalid paid requests are rejected before acquiring provider capacity', as
         body: { target: '中', mimeType: 'audio/wav', audioBase64: 'AQ==' },
       },
       {
+        handler: assessPronunciation,
+        body: {
+          target: '中',
+          mimeType: 'audio/wav',
+          audioBase64: Buffer.alloc(8_000, 1).toString('base64'),
+        },
+      },
+      {
+        handler: assessPronunciation,
+        body: {
+          target: '中',
+          mimeType: 'audio/wav',
+          audioBase64: pcmWavBuffer(6_001).toString('base64'),
+        },
+      },
+      {
         handler: generatePronunciationExamples,
         body: { character: '中国' },
       },
@@ -440,6 +568,7 @@ test('invalid paid requests are rejected before acquiring provider capacity', as
 
     assert.equal(state.acquireBodies.length, 0);
     assert.equal(state.releaseCalls, 0);
+    assert.equal(state.events.length, 0);
     assert.equal(providerFetches, 0);
   });
 });
@@ -471,7 +600,7 @@ test('assessment uses ASR plus a documented direct-audio Qwen Omni JSON decision
       ]);
     }
     return jsonResponse({}, 404);
-  }) as typeof fetch, async () => {
+  }) as typeof fetch, async (state) => {
     const result = await invokeHandler(assessPronunciation, {
       method: 'POST',
       body: { target: '中', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
@@ -487,6 +616,20 @@ test('assessment uses ASR plus a documented direct-audio Qwen Omni JSON decision
       },
     });
     assert.equal(requests.length, 2);
+    assert.deepEqual(
+      state.acquireBodies.map((body) => body.p_operation),
+      ['assessment', 'omni_assessment'],
+    );
+    assert.equal(state.releaseCalls, 2);
+    assert.deepEqual(state.events, [
+      'auth',
+      'acquire:assessment',
+      'provider:asr',
+      'acquire:omni_assessment',
+      'provider:omni',
+      'release',
+      'release',
+    ]);
 
     const asrRequest = requests[0];
     assert.equal(asrRequest.url, DASH_SCOPE_MULTIMODAL_URL);
@@ -649,7 +792,7 @@ test('only an explicit high-confidence incorrect direct decision returns correct
   });
 });
 
-test('assessment maps an empty official ASR transcript to 422', async () => {
+test('assessment maps an empty official ASR transcript to 422 without acquiring Omni capacity', async () => {
   await withServerEnvironment((async () => jsonResponse({
     output: {
       sentence: { sentence_end: true, text: '' },
@@ -657,7 +800,7 @@ test('assessment maps an empty official ASR transcript to 422', async () => {
     },
     usage: { duration: 1 },
     request_id: 'asr-request-id',
-  })) as typeof fetch, async () => {
+  })) as typeof fetch, async (state) => {
     const result = await invokeHandler(assessPronunciation, {
       method: 'POST',
       body: { target: '中国', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
@@ -667,6 +810,11 @@ test('assessment maps an empty official ASR transcript to 422', async () => {
       status: 422,
       body: { error: '没有听清，请再试一次' },
     });
+    assert.deepEqual(
+      state.acquireBodies.map((body) => body.p_operation),
+      ['assessment'],
+    );
+    assert.equal(state.releaseCalls, 1);
   });
 });
 
@@ -680,7 +828,7 @@ test('assessment maps invalid and failed ASR responses to safe 502 errors', asyn
         method: 'POST',
         body: {
           target: '中国',
-          mimeType: 'audio/webm',
+          mimeType: 'audio/wav',
           audioBase64: VALID_AUDIO_BASE64,
         },
       });

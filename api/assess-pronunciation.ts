@@ -17,6 +17,7 @@ import {
 } from '../src/lib/pronunciationRules.ts';
 import {
   type PronunciationSecurityContext,
+  PronunciationSecurityError,
   PronunciationTimeoutError,
   withPronunciationSecurity,
 } from './pronunciationSecurity.ts';
@@ -147,8 +148,9 @@ async function handleAuthorizedAssessment(
       return;
     }
 
-    const { response: judgmentResponse, data: judgmentStream } = await context.fetchText(
-      DASH_SCOPE_CHAT_COMPLETIONS_URL,
+    const { response: judgmentResponse, data: judgmentStream } =
+      await context.withProviderGate('omni_assessment', (providerContext) => (
+        providerContext.fetchText(DASH_SCOPE_CHAT_COMPLETIONS_URL,
       {
       method: 'POST',
       headers: {
@@ -190,8 +192,8 @@ async function handleAuthorizedAssessment(
         temperature: 0,
         max_tokens: 120,
       }),
-      },
-    );
+        },
+      )));
     if (!judgmentResponse.ok) {
       res.status(502).json({ error: '发音评估服务暂时不可用' });
       return;
@@ -226,6 +228,7 @@ async function handleAuthorizedAssessment(
       res.status(504).json({ error: '发音评估超时，请稍后重试' });
       return;
     }
+    if (error instanceof PronunciationSecurityError) throw error;
     res.status(502).json({ error: '发音评估服务暂时不可用' });
   }
 }

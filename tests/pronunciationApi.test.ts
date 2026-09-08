@@ -21,9 +21,9 @@ function withMockedFetch(implementation: typeof fetch) {
   };
 }
 
-test('assessment sends target, mimeType, and base64 audio', async () => {
+test('assessment sends the normalized WAV MIME type and base64 audio', async () => {
   const audioBytes = new Uint8Array(256).fill(1);
-  const audio = new Blob([audioBytes], { type: 'audio/webm' });
+  const audio = new Blob([audioBytes], { type: 'audio/wav' });
   let requestUrl = '';
   let requestInit: RequestInit | undefined;
   const restore = withMockedFetch((async (input, init) => {
@@ -59,7 +59,7 @@ test('assessment sends target, mimeType, and base64 audio', async () => {
       requestInit?.body,
       JSON.stringify({
         target: '中',
-        mimeType: 'audio/webm',
+        mimeType: 'audio/wav',
         audioBase64: Buffer.from(audioBytes).toString('base64'),
       }),
     );
@@ -69,7 +69,7 @@ test('assessment sends target, mimeType, and base64 audio', async () => {
 });
 
 test('malformed assessment JSON throws 语音识别结果无效', async () => {
-  const audio = new Blob([new Uint8Array(256)], { type: 'audio/webm' });
+  const audio = new Blob([new Uint8Array(256)], { type: 'audio/wav' });
   const restore = withMockedFetch((async () => jsonResponse({ correct: 'yes' })) as typeof fetch);
 
   try {

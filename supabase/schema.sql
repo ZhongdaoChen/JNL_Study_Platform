@@ -245,6 +245,19 @@ begin
       principal_concurrency := 2;
       ip_concurrency := 6;
       lease_seconds := 30;
+    when 'omni_assessment' then
+      policy_scope := 'pronunciation-omni';
+      endpoint_name := 'omni_assessment';
+      window_seconds := 60;
+      principal_limit := 30;
+      ip_limit := 90;
+      principal_concurrency := 2;
+      ip_concurrency := 6;
+      lease_seconds := 30;
+      policy_resource_key := 'dashscope-omni';
+      policy_model_key := 'qwen3.5-omni-plus';
+      global_per_second := 1;
+      global_per_minute := 60;
     when 'synthesis' then
       endpoint_name := 'synthesis';
       window_seconds := 60;
