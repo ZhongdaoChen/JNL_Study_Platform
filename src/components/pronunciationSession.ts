@@ -137,6 +137,10 @@ interface PronunciationAudioRun {
   promise: Promise<void>;
 }
 
+// synthesis 在服务端限流里每用户并发上限就是 2（schema.sql principal_concurrency），
+// 客户端并发超过 2 只会被拒绝；读错后 4 条音频分两批并行，比逐条串行快约一半。
+const SYNTHESIS_MAX_CONCURRENCY = 2;
+
 export function createPronunciationAudioWorker(
   synthesize: (item: string, signal: AbortSignal) => Promise<string>,
 ): PronunciationAudioWorker {
@@ -144,7 +148,7 @@ export function createPronunciationAudioWorker(
   let generation = 0;
   let desiredItems: string[] = [];
   let cache = new Map<string, string>();
-  let activeController: AbortController | null = null;
+  const activeControllers = new Set<AbortController>();
   let activeRun: PronunciationAudioRun | null = null;
 
   function reset(wordId: string | null): void {
@@ -152,7 +156,8 @@ export function createPronunciationAudioWorker(
     currentWordId = wordId;
     desiredItems = [];
     cache = new Map();
-    activeController?.abort();
+    for (const controller of activeControllers) controller.abort();
+    activeControllers.clear();
   }
 
   function ensureRun(): PronunciationAudioRun {
@@ -176,40 +181,52 @@ export function createPronunciationAudioWorker(
 
   async function drain(runGeneration: number): Promise<void> {
     const attempted = new Set<string>();
+    const inFlight = new Set<Promise<void>>();
     let firstError: unknown;
 
-    while (runGeneration === generation && currentWordId !== null) {
-      const item = desiredItems.find(
-        (candidate) => !cache.has(candidate) && !attempted.has(candidate),
-      );
-      if (item === undefined) break;
-      attempted.add(item);
+    const isStale = (): boolean => (
+      runGeneration !== generation || currentWordId === null
+    );
 
+    async function runItem(item: string): Promise<void> {
       const controller = new AbortController();
-      activeController = controller;
+      activeControllers.add(controller);
       try {
         const url = await synthesize(item, controller.signal);
-        if (runGeneration !== generation || currentWordId === null) {
-          throw pronunciationAbortError();
-        }
+        if (isStale()) throw pronunciationAbortError();
         cache.set(item, url);
       } catch (error) {
-        if (
-          runGeneration !== generation
-          || currentWordId === null
-          || controller.signal.aborted
-        ) {
+        if (isStale() || controller.signal.aborted) {
           throw pronunciationAbortError(error);
         }
         firstError ??= error;
       } finally {
-        if (activeController === controller) activeController = null;
+        activeControllers.delete(controller);
       }
     }
 
-    if (runGeneration !== generation || currentWordId === null) {
-      throw pronunciationAbortError();
+    try {
+      while (!isStale()) {
+        const item = desiredItems.find(
+          (candidate) => !cache.has(candidate) && !attempted.has(candidate),
+        );
+        if (item !== undefined && inFlight.size < SYNTHESIS_MAX_CONCURRENCY) {
+          attempted.add(item);
+          const tracked = runItem(item).finally(() => {
+            inFlight.delete(tracked);
+          });
+          inFlight.add(tracked);
+          continue;
+        }
+        if (inFlight.size === 0) break;
+        await Promise.race(inFlight);
+      }
+    } finally {
+      // 保证所有在途请求都有归属，避免未处理的 Promise 拒绝。
+      await Promise.allSettled([...inFlight]);
     }
+
+    if (isStale()) throw pronunciationAbortError();
     if (firstError !== undefined) throw firstError;
   }
 

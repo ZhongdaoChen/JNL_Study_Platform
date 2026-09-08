@@ -305,18 +305,18 @@ test('playback advances through the target and three examples then stops', () =>
   assert.deepEqual(advancePronunciationPlayback(state), state);
 });
 
-test('canceling pronunciation synthesis aborts the active item and skips the remaining items', async () => {
+test('canceling pronunciation synthesis aborts in-flight items and skips the remaining ones', async () => {
   const calls: string[] = [];
-  let activeSignal: AbortSignal | null = null;
-  let markStarted: (() => void) | undefined;
-  const started = new Promise<void>((resolve) => {
-    markStarted = resolve;
+  const signals: AbortSignal[] = [];
+  let markSecondStarted: (() => void) | undefined;
+  const secondStarted = new Promise<void>((resolve) => {
+    markSecondStarted = resolve;
   });
   const worker = createPronunciationAudioWorker(
     async (item, signal) => {
       calls.push(item);
-      activeSignal = signal;
-      markStarted?.();
+      signals.push(signal);
+      if (calls.length === 2) markSecondStarted?.();
       return new Promise((_, reject) => {
         signal.addEventListener('abort', () => {
           reject(new DOMException('The operation was aborted.', 'AbortError'));
@@ -326,15 +326,59 @@ test('canceling pronunciation synthesis aborts the active item and skips the rem
   );
 
   const request = worker.reconcile('word-1', ['中', '中国', '中午', '中心']);
-  await started;
+  await secondStarted;
   worker.invalidate();
 
   await assert.rejects(
     request,
     (error: unknown) => error instanceof Error && error.name === 'AbortError',
   );
-  assert.equal(activeSignal?.aborted, true);
-  assert.deepEqual(calls, ['中']);
+  // 并发上限为 2：取消时两条在途请求都被中止，剩余两条不再发起。
+  assert.deepEqual(calls, ['中', '中国']);
+  assert.equal(signals.length, 2);
+  assert.equal(signals.every((signal) => signal.aborted), true);
+});
+
+test('audio worker runs at most two syntheses concurrently', async () => {
+  const calls: string[] = [];
+  const resolvers: Array<(url: string) => void> = [];
+  let active = 0;
+  let maxActive = 0;
+  let markSecondStarted: (() => void) | undefined;
+  const secondStarted = new Promise<void>((resolve) => {
+    markSecondStarted = resolve;
+  });
+  const worker = createPronunciationAudioWorker((item) => {
+    calls.push(item);
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    if (calls.length === 2) markSecondStarted?.();
+    return new Promise<string>((resolve) => {
+      resolvers.push((url) => {
+        active -= 1;
+        resolve(url);
+      });
+    });
+  });
+
+  const request = worker.reconcile('word-1', ['中', '中国', '中午', '中心']);
+  await secondStarted;
+  assert.equal(maxActive, 2);
+  assert.deepEqual(calls, ['中', '中国']);
+
+  for (let settled = 0; settled < 4; settled += 1) {
+    while (resolvers.length === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const settle = resolvers.shift();
+    settle?.(`https://audio.example/${settled}.wav`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  const urls = await request;
+  assert.equal(maxActive, 2);
+  assert.deepEqual(calls, ['中', '中国', '中午', '中心']);
+  assert.deepEqual([...urls.keys()], ['中', '中国', '中午', '中心']);
 });
 
 test('changing words waits for canceled synthesis to settle before starting the next word', async () => {

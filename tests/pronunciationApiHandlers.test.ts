@@ -825,7 +825,7 @@ test('synthesis upgrades a documented signed DashScope OSS HTTP URL to HTTPS', a
         language_type: 'Chinese',
         instructions:
           '用标准普通话朗读，发音清晰、自然、亲切，语速适中，适合儿童跟读模仿，不带任何方言口音。',
-        optimize_instructions: true,
+        optimize_instructions: false,
       },
     });
   });

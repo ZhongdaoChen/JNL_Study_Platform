@@ -74,7 +74,9 @@ async function handleAuthorizedSynthesis(
           voice: TTS_VOICE,
           language_type: 'Chinese',
           instructions: TTS_INSTRUCTIONS,
-          optimize_instructions: true,
+          // 实测 optimize_instructions:true 会让上游先用大模型改写指令，
+          // 单次合成从约 0.4 秒涨到 2.3~2.9 秒；指令是固定文本，改写没有价值。
+          optimize_instructions: false,
         },
       }),
       },
