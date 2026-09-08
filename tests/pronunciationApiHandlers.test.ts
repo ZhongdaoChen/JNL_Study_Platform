@@ -676,6 +676,68 @@ test('assessment maps invalid and failed upstream responses to safe 502 errors',
   }
 });
 
+test('assessment retries a transient upstream rejection once and can succeed', async () => {
+  let fetchCount = 0;
+  await withServerEnvironment((async () => {
+    fetchCount += 1;
+    if (fetchCount === 1) {
+      return jsonResponse({
+        error: { code: 'Throttling.RateQuota', message: 'rate limit exceeded' },
+      }, 429);
+    }
+    return sseResponse([
+      '{"recognizedText":"中","status":"correct","confidence":0.98,"acceptedReading":"zhōng"}',
+    ]);
+  }) as typeof fetch, async () => {
+    const result = await invokeHandler(assessPronunciation, {
+      method: 'POST',
+      body: { target: '中', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
+    });
+
+    assert.equal(result.status, 200);
+    assert.equal(fetchCount, 2);
+  });
+});
+
+test('assessment gives up after two transient upstream failures', async () => {
+  let fetchCount = 0;
+  await withServerEnvironment((async () => {
+    fetchCount += 1;
+    return jsonResponse({ error: { code: 'InternalError' } }, 503);
+  }) as typeof fetch, async () => {
+    const result = await invokeHandler(assessPronunciation, {
+      method: 'POST',
+      body: { target: '中', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
+    });
+
+    assert.deepEqual(result, {
+      status: 502,
+      body: { error: '发音评估服务暂时不可用' },
+    });
+    assert.equal(fetchCount, 2);
+  });
+});
+
+test('assessment does not retry a non-transient upstream rejection', async () => {
+  let fetchCount = 0;
+  await withServerEnvironment((async () => {
+    fetchCount += 1;
+    return jsonResponse({ error: { code: 'InvalidParameter', message: 'bad audio' } }, 400);
+  }) as typeof fetch, async () => {
+    const result = await invokeHandler(assessPronunciation, {
+      method: 'POST',
+      body: { target: '中', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
+    });
+
+    assert.deepEqual(result, {
+      status: 502,
+      body: { error: '发音评估服务暂时不可用' },
+    });
+    assert.equal(fetchCount, 1);
+    assert.doesNotMatch(JSON.stringify(result.body), /bad audio|InvalidParameter/);
+  });
+});
+
 test('assessment rejects a polyphonic judgment with an invalid reading value', async () => {
   await withServerEnvironment((async () => sseResponse([
     '{"recognizedText":"中","status":"correct","confidence":0.99,"acceptedReading":"<script>"}',

@@ -23,6 +23,9 @@ import {
 // 单阶段评估：一次调用同时完成转写与发音判定。模型固定，避免部署配置漂移。
 const ASSESS_MODEL = 'qwen3.5-omni-flash';
 const HIGH_CONFIDENCE_THRESHOLD = 0.9;
+// 上游限流/抖动时重试一次；4xx（除 429）是请求本身的问题，重试没有意义。
+const TRANSIENT_UPSTREAM_STATUS = new Set([429, 500, 502, 503, 504]);
+const MAX_UPSTREAM_ATTEMPTS = 2;
 const MAX_RECOGNIZED_TEXT_CHARACTERS = 120;
 const PINYIN_RE = /^[a-züvāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]+[1-5]?$/iu;
 
@@ -90,9 +93,7 @@ async function handleAuthorizedAssessment(
   try {
     const audioFormat = audioFormatForMimeType(request.mimeType);
     const audioDataUrl = `data:${request.mimeType};base64,${request.audioBase64}`;
-    const { response: judgmentResponse, data: judgmentStream } = await context.fetchText(
-      DASH_SCOPE_CHAT_COMPLETIONS_URL,
-      {
+    const upstreamRequest = {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -133,9 +134,41 @@ async function handleAuthorizedAssessment(
         temperature: 0,
         max_tokens: 200,
       }),
-      },
-    );
-    if (!judgmentResponse.ok) {
+    };
+
+    let judgmentResponse: Response | null = null;
+    let judgmentStream: string | null = null;
+    for (let attempt = 1; attempt <= MAX_UPSTREAM_ATTEMPTS; attempt += 1) {
+      try {
+        const result = await context.fetchText(
+          DASH_SCOPE_CHAT_COMPLETIONS_URL,
+          upstreamRequest,
+        );
+        if (result.response.ok) {
+          judgmentResponse = result.response;
+          judgmentStream = result.data;
+          break;
+        }
+        // 只记录状态码与上游 error.code/message 字段，不落盘完整响应或任何密钥。
+        console.error('pronunciation upstream rejected', JSON.stringify({
+          attempt,
+          status: result.response.status,
+          detail: await upstreamErrorDetail(result.response),
+        }));
+        if (!TRANSIENT_UPSTREAM_STATUS.has(result.response.status)) break;
+      } catch (error) {
+        if (error instanceof PronunciationTimeoutError) throw error;
+        console.error('pronunciation upstream network failure', JSON.stringify({
+          attempt,
+          name: error instanceof Error ? error.name : typeof error,
+          message: error instanceof Error
+            ? error.message.slice(0, 200)
+            : undefined,
+        }));
+        if (attempt === MAX_UPSTREAM_ATTEMPTS) throw error;
+      }
+    }
+    if (judgmentResponse === null) {
       res.status(502).json({ error: '发音评估服务暂时不可用' });
       return;
     }
@@ -176,6 +209,24 @@ async function handleAuthorizedAssessment(
       return;
     }
     res.status(502).json({ error: '发音评估服务暂时不可用' });
+  }
+}
+
+async function upstreamErrorDetail(
+  response: Response,
+): Promise<{ code?: string; message?: string } | null> {
+  try {
+    const parsed = parseJsonObject(await response.text());
+    if (!parsed) return null;
+    const error = isRecord(parsed.error) ? parsed.error : parsed;
+    const detail: { code?: string; message?: string } = {};
+    if (typeof error.code === 'string') detail.code = error.code.slice(0, 100);
+    if (typeof error.message === 'string') {
+      detail.message = error.message.slice(0, 200);
+    }
+    return Object.keys(detail).length > 0 ? detail : null;
+  } catch {
+    return null;
   }
 }
 
