@@ -3,6 +3,7 @@ export type ReviewGradeSource = 'manual' | 'voice';
 export interface ReviewGradeCoordinator {
   pendingWordIds: Set<string>;
   automaticPendingWordId: string | null;
+  forwardNavigatedWordIds: Set<string>;
   voiceLockedWordId: string | null;
 }
 
@@ -16,10 +17,13 @@ export type ReviewGradeSubmissionResult<T> =
   | { accepted: true; value: T }
   | { accepted: false };
 
+export type ReviewGradeNavigationDirection = 'previous' | 'next';
+
 export function createReviewGradeCoordinator(): ReviewGradeCoordinator {
   return {
     pendingWordIds: new Set<string>(),
     automaticPendingWordId: null,
+    forwardNavigatedWordIds: new Set<string>(),
     voiceLockedWordId: null,
   };
 }
@@ -28,15 +32,65 @@ export function reviewGradeAvailability(
   coordinator: ReviewGradeCoordinator,
   wordId: string,
 ): ReviewGradeAvailability {
-  const automaticPending = coordinator.automaticPendingWordId === wordId;
+  const automaticPending = coordinator.automaticPendingWordId !== null;
   return {
     automaticPending,
     manualGradeDisabled: (
-      coordinator.pendingWordIds.has(wordId)
+      automaticPending
+      || coordinator.pendingWordIds.has(wordId)
       || coordinator.voiceLockedWordId === wordId
     ),
     conflictingActionsDisabled: automaticPending,
   };
+}
+
+export function reviewGradeNavigationAllowed(
+  coordinator: ReviewGradeCoordinator,
+  direction: ReviewGradeNavigationDirection,
+): boolean {
+  return (
+    direction === 'next'
+    || coordinator.automaticPendingWordId === null
+  );
+}
+
+export function beginReviewGradeNavigation(
+  coordinator: ReviewGradeCoordinator,
+  wordId: string,
+  direction: ReviewGradeNavigationDirection,
+): boolean {
+  if (!reviewGradeNavigationAllowed(coordinator, direction)) {
+    return false;
+  }
+  if (
+    direction === 'next'
+    && coordinator.automaticPendingWordId === wordId
+  ) {
+    coordinator.forwardNavigatedWordIds.add(wordId);
+  }
+  return true;
+}
+
+export function shouldApplyAutomaticGradeCompletion(
+  coordinator: ReviewGradeCoordinator,
+  wordId: string,
+  currentWordId: string | null,
+): boolean {
+  return (
+    currentWordId === wordId
+    && !coordinator.forwardNavigatedWordIds.has(wordId)
+  );
+}
+
+export async function waitForReviewGradeFeedback(
+  delayMs: number,
+  wait: (delayMs: number) => Promise<void> = (ms) => (
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, ms);
+    })
+  ),
+): Promise<void> {
+  if (delayMs > 0) await wait(delayMs);
 }
 
 export function resetReviewGradeCoordinatorForWord(
@@ -60,6 +114,7 @@ export function beginReviewGradeSubmission(
 ): boolean {
   if (
     coordinator.pendingWordIds.has(wordId)
+    || coordinator.automaticPendingWordId !== null
     || coordinator.voiceLockedWordId === wordId
   ) {
     return false;
@@ -93,6 +148,7 @@ export function finishReviewGradeSubmission(
   if (coordinator.automaticPendingWordId === wordId) {
     coordinator.automaticPendingWordId = null;
   }
+  coordinator.forwardNavigatedWordIds.delete(wordId);
 }
 
 export async function submitCoordinatedReviewGrade<T>(

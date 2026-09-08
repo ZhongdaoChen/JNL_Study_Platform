@@ -18,10 +18,14 @@ import {
   mergePronunciationExamplesInQueue,
 } from './pronunciationSession';
 import {
+  beginReviewGradeNavigation,
   createReviewGradeCoordinator,
   resetReviewGradeCoordinatorForWord,
   reviewGradeAvailability,
+  reviewGradeNavigationAllowed,
+  shouldApplyAutomaticGradeCompletion,
   submitCoordinatedReviewGrade,
+  waitForReviewGradeFeedback,
   type ReviewGradeSource,
 } from './reviewGradeSession';
 
@@ -150,14 +154,17 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   ): Promise<void> {
     if (!current) return;
     const target = current;
-    const automaticGradeStartedAt = Date.now();
 
     const todayStr = today();
     const isRetryAttempt = spellingOnly
       ? target.spellingPendingRetryCount > 0 && target.spellingDueDate <= todayStr
       : target.pendingRetryCount > 0 && target.dueDate <= todayStr;
-    const applyGradeUi = (shouldAdvance: boolean) => {
+    const applyGradeUi = (
+      shouldAdvance: boolean,
+      shouldResetCurrentWord = true,
+    ) => {
       setDoneCount((c) => c + 1);
+      if (!shouldResetCurrentWord) return;
       setShowExample(false);
       setGenError(null);
       exampleRequestRef.current += 1;
@@ -178,15 +185,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         () => submitReview(repo, target, g, spellingOnly, isRetryAttempt),
         async (updated) => {
           if (source === 'voice' && advance && advanceAfterMs > 0) {
-            const remainingDelayMs = Math.max(
-              0,
-              advanceAfterMs - (Date.now() - automaticGradeStartedAt),
-            );
-            if (remainingDelayMs > 0) {
-              await new Promise<void>((resolve) => {
-                window.setTimeout(resolve, remainingDelayMs);
-              });
-            }
+            await waitForReviewGradeFeedback(advanceAfterMs);
           }
           // 补做排队规则见 reviewQueue.ts：首次彻底陌生的补做插到约 10 个词后，
           // 补做时再评分则把剩余补做追加到队尾
@@ -196,9 +195,12 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
             gradedIndex: q.findIndex((w) => w.id === updated.id),
           }));
           if (source === 'voice') {
-            applyGradeUi(
-              advance && currentWordIdRef.current === target.id,
+            const applyCompletion = shouldApplyAutomaticGradeCompletion(
+              gradeCoordinatorRef.current,
+              target.id,
+              currentWordIdRef.current,
             );
+            applyGradeUi(advance && applyCompletion, applyCompletion);
           }
           onChanged();
         },
@@ -217,14 +219,15 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
 
   // 在队列中前后切换，不评分
   function goTo(i: number) {
-    if (
-      current
-      && reviewGradeAvailability(
+    if (current && i !== idx) {
+      const direction = i < idx ? 'previous' : 'next';
+      if (!beginReviewGradeNavigation(
         gradeCoordinatorRef.current,
         current.id,
-      ).conflictingActionsDisabled
-    ) {
-      return;
+        direction,
+      )) {
+        return;
+      }
     }
     setShowExample(false);
     setGenError(null);
@@ -474,7 +477,13 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         <button
           className="word-arrow"
           onClick={() => goTo(idx - 1)}
-          disabled={idx === 0 || gradeAvailability.conflictingActionsDisabled}
+          disabled={
+            idx === 0
+            || !reviewGradeNavigationAllowed(
+              gradeCoordinatorRef.current,
+              'previous',
+            )
+          }
           title="上一个"
           aria-label="上一个"
         >
@@ -542,7 +551,10 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
           onClick={() => goTo(idx + 1)}
           disabled={
             idx >= queue.length - 1
-            || gradeAvailability.conflictingActionsDisabled
+            || !reviewGradeNavigationAllowed(
+              gradeCoordinatorRef.current,
+              'next',
+            )
           }
           title="下一个"
           aria-label="下一个"

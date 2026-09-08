@@ -1,10 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  beginReviewGradeNavigation,
   createReviewGradeCoordinator,
   resetReviewGradeCoordinatorForWord,
   reviewGradeAvailability,
+  reviewGradeNavigationAllowed,
+  shouldApplyAutomaticGradeCompletion,
   submitCoordinatedReviewGrade,
+  waitForReviewGradeFeedback,
 } from '../src/components/reviewGradeSession.ts';
 import { reviewGradeFromShortcut } from '../src/components/reviewKeyboard.ts';
 
@@ -168,4 +172,143 @@ test('correct automatic grade runs its advance callback once and only after save
     manualGradeDisabled: false,
     conflictingActionsDisabled: false,
   });
+});
+
+test('pending automatic grade allows forward navigation but keeps previous navigation blocked', async () => {
+  const coordinator = createReviewGradeCoordinator();
+  const save = deferredPromise<string>();
+
+  const automatic = submitCoordinatedReviewGrade(
+    coordinator,
+    {
+      wordId: 'word-1',
+      source: 'voice',
+      advance: true,
+    },
+    () => save.promise,
+  );
+
+  assert.equal(
+    reviewGradeNavigationAllowed(coordinator, 'next'),
+    true,
+  );
+  assert.equal(
+    reviewGradeNavigationAllowed(coordinator, 'previous'),
+    false,
+  );
+  assert.equal(
+    beginReviewGradeNavigation(coordinator, 'word-1', 'previous'),
+    false,
+  );
+  assert.equal(
+    beginReviewGradeNavigation(coordinator, 'word-1', 'next'),
+    true,
+  );
+  assert.equal(
+    reviewGradeNavigationAllowed(coordinator, 'previous'),
+    false,
+  );
+  assert.deepEqual(reviewGradeAvailability(coordinator, 'word-2'), {
+    automaticPending: true,
+    manualGradeDisabled: true,
+    conflictingActionsDisabled: true,
+  });
+  const manualOnNextWord = await submitCoordinatedReviewGrade(
+    coordinator,
+    {
+      wordId: 'word-2',
+      source: 'manual',
+      advance: true,
+    },
+    async () => 'unexpected-save',
+  );
+  assert.deepEqual(manualOnNextWord, { accepted: false });
+
+  save.resolve('saved');
+  await automatic;
+});
+
+test('forward navigation consumes pending automatic advance and prevents completion UI on the next word', async () => {
+  const coordinator = createReviewGradeCoordinator();
+  const save = deferredPromise<string>();
+  let currentWordId = 'word-1';
+  let automaticAdvanceCount = 0;
+  let completionUiCount = 0;
+
+  const automatic = submitCoordinatedReviewGrade(
+    coordinator,
+    {
+      wordId: 'word-1',
+      source: 'voice',
+      advance: true,
+    },
+    () => save.promise,
+    () => {
+      if (shouldApplyAutomaticGradeCompletion(
+        coordinator,
+        'word-1',
+        currentWordId,
+      )) {
+        completionUiCount += 1;
+        automaticAdvanceCount += 1;
+      }
+    },
+  );
+
+  assert.equal(
+    beginReviewGradeNavigation(coordinator, 'word-1', 'next'),
+    true,
+  );
+  assert.equal(
+    shouldApplyAutomaticGradeCompletion(
+      coordinator,
+      'word-1',
+      currentWordId,
+    ),
+    false,
+  );
+  currentWordId = 'word-2';
+  save.resolve('saved');
+  await automatic;
+
+  assert.equal(automaticAdvanceCount, 0);
+  assert.equal(completionUiCount, 0);
+});
+
+test('correct feedback delay starts after persistence and keeps its full duration', async () => {
+  const coordinator = createReviewGradeCoordinator();
+  const save = deferredPromise<string>();
+  const feedbackDelay = deferredPromise<void>();
+  const events: string[] = [];
+
+  const automatic = submitCoordinatedReviewGrade(
+    coordinator,
+    {
+      wordId: 'word-1',
+      source: 'voice',
+      advance: true,
+    },
+    async () => {
+      const value = await save.promise;
+      events.push('persisted');
+      return value;
+    },
+    async () => {
+      await waitForReviewGradeFeedback(1200, async (delayMs) => {
+        events.push(`delay:${delayMs}`);
+        await feedbackDelay.promise;
+      });
+      events.push('advanced');
+    },
+  );
+
+  assert.deepEqual(events, []);
+  save.resolve('saved');
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(events, ['persisted', 'delay:1200']);
+
+  feedbackDelay.resolve();
+  await automatic;
+  assert.deepEqual(events, ['persisted', 'delay:1200', 'advanced']);
 });
