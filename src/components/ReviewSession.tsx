@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { repo } from '../lib/db';
-import { countdownSecForWord } from '../lib/reviewCountdown';
+import {
+  countdownSecForWord,
+  shouldPauseNewReviewCountdown,
+} from '../lib/reviewCountdown';
 import { applyReviewToQueue } from '../lib/reviewQueue';
 import { archiveWordFromSpelling, getDueReviews, submitReview } from '../lib/wordService';
 import { generateExampleImage, generateExampleSentence } from '../lib/ai';
@@ -34,6 +37,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   // 倒计时剩余毫秒（仅显示用）。0 或 countdownSec<=0 时不启用倒计时。
   const [remainMs, setRemainMs] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const [hasManuallyStartedCountdown, setHasManuallyStartedCountdown] = useState(false);
   const remainRef = useRef(0);
   const exampleRequestRef = useRef(0);
   const imageRequestRef = useRef(0);
@@ -42,6 +46,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     let active = true;
     (async () => {
       setLoading(true);
+      setHasManuallyStartedCountdown(false);
       const due = await getDueReviews(repo, childId, lang, spellingOnly, dailyLimit);
       if (!active) return;
       setQueue(due);
@@ -58,7 +63,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     return () => {
       active = false;
     };
-    // 进入复习页/切换孩子/切换语言时各加载一次队列；
+    // 进入复习页/切换孩子/切换语言时各加载一次队列，并重置本次倒计时会话；
     // 评分过程中不重载，避免进度被重置（onChanged 只用于刷新其他标签）。
   }, [childId, lang, spellingOnly, dailyLimit]);
 
@@ -74,13 +79,18 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   // 始终持有最新的 grade，供倒计时回调调用（避免把 grade 放进定时器依赖导致重置）
   const gradeRef = useRef<(g: Grade, advance?: boolean) => void>(() => {});
 
-  // 切换词或修改配置时重置倒计时。词组（>=3 词）按翻倍后的时长计算。
+  // 切换词或修改配置时重置倒计时。首次手动启动前，新词继续保持暂停。
   useEffect(() => {
     const sec = current ? countdownSecForWord(countdownSec, current.text) : countdownSec;
     remainRef.current = current && sec > 0 ? sec * 1000 : 0;
     setRemainMs(remainRef.current);
-    setIsPaused(false);
-  }, [current?.id, countdownSec]);
+    setIsPaused(
+      shouldPauseNewReviewCountdown(
+        Boolean(current) && countdownSec > 0,
+        hasManuallyStartedCountdown,
+      ),
+    );
+  }, [current?.id, countdownSec, hasManuallyStartedCountdown]);
 
   // 倒计时：每个词展示时启动；归零且用户未评分则自动判「彻底陌生」，但停留在当前词不跳转
   useEffect(() => {
@@ -252,10 +262,15 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     return e instanceof Error ? e.message : fallback;
   }
 
-  function togglePause() {
+  const togglePause = useCallback(() => {
     if (countdownSec <= 0) return;
-    setIsPaused((v) => !v);
-  }
+    if (!hasManuallyStartedCountdown) {
+      setHasManuallyStartedCountdown(true);
+      setIsPaused(false);
+      return;
+    }
+    setIsPaused((paused) => !paused);
+  }, [countdownSec, hasManuallyStartedCountdown]);
 
   function gradeFromButton(g: Grade, button: HTMLButtonElement) {
     releaseReviewActionFocus(button);
@@ -287,12 +302,12 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         return;
       }
       event.preventDefault();
-      setIsPaused((v) => !v);
+      togglePause();
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [countdownSec, current]);
+  }, [countdownSec, current, togglePause]);
 
   const unit = lang === 'zh' ? '字' : '单词';
   const modeLabel = spellingOnly ? (lang === 'zh' ? '会写' : '拼写') : '复习';
