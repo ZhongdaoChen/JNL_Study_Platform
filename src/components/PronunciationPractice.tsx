@@ -21,7 +21,8 @@ import {
   beginPronunciationOutcome,
   cancelPendingPronunciationSuccess,
   createPronunciationAudioWorker,
-  finalizePendingPronunciationSuccess,
+  pronunciationMicrophoneDisabled,
+  settlePronunciationOutcome,
   startPronunciationPlayback,
 } from './pronunciationSession';
 
@@ -41,13 +42,15 @@ export interface PronunciationPracticeProps {
     grade: 'mastered' | 'forgotten',
     advance: boolean,
     advanceAfterMs: number,
-  ): Promise<void>;
+  ): Promise<boolean>;
+  automaticGradePending: boolean;
 }
 
 export default function PronunciationPractice({
   word,
   onExamplesChanged,
   onVoiceGrade,
+  automaticGradePending,
 }: PronunciationPracticeProps) {
   const [uiWordId, setUiWordId] = useState(word.id);
   const [status, setStatus] = useState<PronunciationStatus>('idle');
@@ -296,6 +299,7 @@ export default function PronunciationPractice({
       status === 'requesting-permission'
       || status === 'assessing'
       || advancePending
+      || automaticGradePending
       || pendingAdvanceWordIdRef.current === currentWordIdRef.current
     ) {
       return;
@@ -394,7 +398,23 @@ export default function PronunciationPractice({
       setFeedback(outcome.message);
 
       if (outcome.grade === 'forgotten') {
-        await onVoiceGradeRef.current('forgotten', false, 0);
+        try {
+          const accepted = await onVoiceGradeRef.current('forgotten', false, 0);
+          settlePronunciationOutcome(
+            gradedWordIdsRef.current,
+            pendingSuccessWordIdsRef.current,
+            wordId,
+            accepted,
+          );
+        } catch (error) {
+          settlePronunciationOutcome(
+            gradedWordIdsRef.current,
+            pendingSuccessWordIdsRef.current,
+            wordId,
+            false,
+          );
+          throw error;
+        }
       } else if (outcome.grade === 'mastered' && outcome.advanceAfterMs !== null) {
         setAdvancePending(true);
         pendingAdvanceWordIdRef.current = wordId;
@@ -403,17 +423,27 @@ export default function PronunciationPractice({
           && currentWordIdRef.current === wordId
           && assessmentRequestRef.current === assessmentRequestId
         );
-        if (shouldSubmit && finalizePendingPronunciationSuccess(
-          gradedWordIdsRef.current,
-          pendingSuccessWordIdsRef.current,
-          wordId,
-        )) {
+        if (shouldSubmit) {
           try {
-            await onVoiceGradeRef.current(
+            const accepted = await onVoiceGradeRef.current(
               'mastered',
               true,
               outcome.advanceAfterMs,
             );
+            settlePronunciationOutcome(
+              gradedWordIdsRef.current,
+              pendingSuccessWordIdsRef.current,
+              wordId,
+              accepted,
+            );
+          } catch (error) {
+            settlePronunciationOutcome(
+              gradedWordIdsRef.current,
+              pendingSuccessWordIdsRef.current,
+              wordId,
+              false,
+            );
+            throw error;
           } finally {
             if (pendingAdvanceWordIdRef.current === wordId) {
               pendingAdvanceWordIdRef.current = null;
@@ -568,10 +598,12 @@ export default function PronunciationPractice({
     : isSingleCharacter && visibleExamples.length < 3;
   const visibleExamplesError = uiMatchesWord ? examplesError : null;
   const visiblePlayingIndex = uiMatchesWord ? playingIndex : null;
-  const microphoneDisabled = !uiMatchesWord
-    || visibleStatus === 'requesting-permission'
-    || visibleStatus === 'assessing'
-    || advancePending;
+  const microphoneDisabled = pronunciationMicrophoneDisabled(
+    uiMatchesWord,
+    visibleStatus,
+    advancePending,
+    automaticGradePending,
+  );
   const microphoneLabel = visibleStatus === 'listening'
     ? '停止并提交'
     : visibleStatus === 'incorrect' || visibleStatus === 'error'

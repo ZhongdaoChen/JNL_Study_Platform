@@ -1039,6 +1039,93 @@ no output (unchanged)
 
 ---
 
+# Scoped double-grade race follow-up — 2026-09-08
+
+## Status
+
+Fixed the remaining scoped pronunciation grading races without changing the
+global Omni quota or server WAV-duration validation:
+
+- While an earlier automatic grade is pending, the next word's microphone is
+  disabled and the coordinator still rejects any stale voice submission.
+- Pronunciation first-attempt state is committed only after the coordinator
+  accepts and persists the automatic grade; rejected submissions release the
+  pending attempt.
+- An incorrect automatic grade installs its manual-grade lock only if that word
+  is still current and was not left through forward navigation.
+- A normal incorrect completion on the same word continues to lock manual
+  grading.
+
+## TDD evidence
+
+The new regressions were run before implementation and failed in the expected
+three places:
+
+```text
+node --experimental-strip-types --test \
+  tests/reviewGradeSession.test.ts \
+  tests/pronunciationSession.test.ts
+tests 26
+pass 23
+fail 3
+
+Failures:
+- rejected coordinator submission consumed the new word's first attempt
+- new-word microphone busy policy was absent
+- delayed incorrect completion installed a stale old-word lock
+```
+
+After the implementation, the focused coverage passed:
+
+```text
+node --experimental-strip-types --test \
+  tests/reviewGradeSession.test.ts \
+  tests/reviewKeyboard.test.ts \
+  tests/pronunciationSession.test.ts
+tests 35
+pass 35
+fail 0
+```
+
+## Final validation
+
+```text
+node --experimental-strip-types --test tests/*.test.ts
+tests 170
+pass 170
+fail 0
+cancelled 0
+skipped 0
+todo 0
+
+npm run build
+tsc -b && vite build
+97 modules transformed
+completed successfully
+
+npx eslint --quiet \
+  src/components/reviewGradeSession.ts \
+  src/components/ReviewSession.tsx \
+  src/components/pronunciationSession.ts \
+  src/components/PronunciationPractice.tsx \
+  tests/reviewGradeSession.test.ts \
+  tests/pronunciationSession.test.ts
+exit code 0
+
+git diff --check
+exit code 0
+
+git diff --name-only -- package-lock.json
+no output (unchanged)
+```
+
+## Remaining concerns
+
+None identified in the requested scope. Deployment still depends on the
+existing pronunciation provider and Supabase configuration documented above.
+
+---
+
 # Scoped Double-Grade Follow-up
 
 Date: 2026-09-08

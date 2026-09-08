@@ -11,6 +11,7 @@ import {
   mergeExampleSentenceInQueue,
   mergePronunciationExamplesInQueue,
   pronunciationOutcome,
+  settlePronunciationOutcome,
   startPronunciationPlayback,
 } from '../src/components/pronunciationSession.ts';
 import type { Word } from '../src/lib/types.ts';
@@ -52,7 +53,7 @@ test('an unseen word has a first pronunciation attempt', () => {
   assert.equal(isFirstPronunciationAttempt(gradedWordIds, 'known'), false);
 });
 
-test('an incorrect outcome locks the word id immediately', () => {
+test('an incorrect outcome reserves the first attempt until its grade is accepted', () => {
   const gradedWordIds = new Set<string>();
   const pendingSuccessWordIds = new Set<string>();
 
@@ -63,13 +64,73 @@ test('an incorrect outcome locks the word id immediately', () => {
     false,
   );
 
-  assert.equal(gradedWordIds.has('word-1'), true);
-  assert.equal(pendingSuccessWordIds.has('word-1'), false);
+  assert.equal(gradedWordIds.has('word-1'), false);
+  assert.equal(pendingSuccessWordIds.has('word-1'), true);
   assert.deepEqual(outcome, {
     grade: 'forgotten',
     advanceAfterMs: null,
     message: '再试一次',
   });
+
+  settlePronunciationOutcome(
+    gradedWordIds,
+    pendingSuccessWordIds,
+    'word-1',
+    true,
+  );
+  assert.equal(gradedWordIds.has('word-1'), true);
+  assert.equal(pendingSuccessWordIds.has('word-1'), false);
+});
+
+test('a rejected coordinator submission does not consume the first pronunciation grade', async () => {
+  const coordinatorModule = await import('../src/components/reviewGradeSession.ts');
+  const coordinator = coordinatorModule.createReviewGradeCoordinator();
+  const previousSave = deferredPromise<string>();
+  const previousGrade = coordinatorModule.submitCoordinatedReviewGrade(
+    coordinator,
+    {
+      wordId: 'word-previous',
+      source: 'voice',
+      advance: true,
+    },
+    () => previousSave.promise,
+  );
+  for (const correct of [false, true]) {
+    const wordId = correct ? 'word-new-correct' : 'word-new-incorrect';
+    const gradedWordIds = new Set<string>();
+    const pendingAttemptWordIds = new Set<string>();
+
+    const outcome = beginPronunciationOutcome(
+      gradedWordIds,
+      pendingAttemptWordIds,
+      wordId,
+      correct,
+    );
+    const rejected = await coordinatorModule.submitCoordinatedReviewGrade(
+      coordinator,
+      {
+        wordId,
+        source: 'voice',
+        advance: correct,
+      },
+      async () => 'unexpected-save',
+    );
+    if (!rejected.accepted) {
+      settlePronunciationOutcome(
+        gradedWordIds,
+        pendingAttemptWordIds,
+        wordId,
+        false,
+      );
+    }
+
+    assert.equal(outcome.grade, correct ? 'mastered' : 'forgotten');
+    assert.deepEqual(rejected, { accepted: false });
+    assert.equal(isFirstPronunciationAttempt(gradedWordIds, wordId), true);
+  }
+
+  previousSave.resolve('saved');
+  await previousGrade;
 });
 
 test('a correct outcome stays pending until its delayed grade is submitted', () => {
@@ -414,3 +475,13 @@ test('the legacy cache filler remains sequential for existing callers', async ()
   assert.deepEqual(calls, ['中国', '中午']);
   assert.deepEqual([...result.keys()], ['中', '中国', '中午']);
 });
+
+function deferredPromise<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, resolve, reject };
+}

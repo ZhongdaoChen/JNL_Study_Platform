@@ -35,19 +35,26 @@ export function pronunciationOutcome(
 
 export function beginPronunciationOutcome(
   gradedWordIds: Set<string>,
-  pendingSuccessWordIds: Set<string>,
+  pendingAttemptWordIds: Set<string>,
   wordId: string,
   correct: boolean,
 ): ReturnType<typeof pronunciationOutcome> {
   const alreadyGraded = (
     !isFirstPronunciationAttempt(gradedWordIds, wordId)
-    || pendingSuccessWordIds.has(wordId)
+    || pendingAttemptWordIds.has(wordId)
   );
-  if (!alreadyGraded) {
-    if (correct) pendingSuccessWordIds.add(wordId);
-    else gradedWordIds.add(wordId);
-  }
+  if (!alreadyGraded) pendingAttemptWordIds.add(wordId);
   return pronunciationOutcome(alreadyGraded, correct);
+}
+
+export function settlePronunciationOutcome(
+  gradedWordIds: Set<string>,
+  pendingAttemptWordIds: Set<string>,
+  wordId: string,
+  accepted: boolean,
+): void {
+  pendingAttemptWordIds.delete(wordId);
+  if (accepted) gradedWordIds.add(wordId);
 }
 
 export function finalizePendingPronunciationSuccess(
@@ -65,6 +72,21 @@ export function cancelPendingPronunciationSuccess(
   wordId: string,
 ): boolean {
   return pendingSuccessWordIds.delete(wordId);
+}
+
+export function pronunciationMicrophoneDisabled(
+  uiMatchesWord: boolean,
+  status: string,
+  advancePending: boolean,
+  automaticGradePending: boolean,
+): boolean {
+  return (
+    !uiMatchesWord
+    || status === 'requesting-permission'
+    || status === 'assessing'
+    || advancePending
+    || automaticGradePending
+  );
 }
 
 export function mergePronunciationExamplesInQueue(

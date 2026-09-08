@@ -11,6 +11,7 @@ import {
   waitForReviewGradeFeedback,
 } from '../src/components/reviewGradeSession.ts';
 import { reviewGradeFromShortcut } from '../src/components/reviewKeyboard.ts';
+import { pronunciationMicrophoneDisabled } from '../src/components/pronunciationSession.ts';
 
 function deferredPromise<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -226,6 +227,108 @@ test('pending automatic grade allows forward navigation but keeps previous navig
 
   save.resolve('saved');
   await automatic;
+});
+
+test('new-word pronunciation stays disabled and its voice grade is rejected while the previous save is pending', async () => {
+  const coordinator = createReviewGradeCoordinator();
+  const save = deferredPromise<string>();
+
+  const automatic = submitCoordinatedReviewGrade(
+    coordinator,
+    {
+      wordId: 'word-1',
+      source: 'voice',
+      advance: true,
+    },
+    () => save.promise,
+  );
+
+  assert.equal(
+    beginReviewGradeNavigation(coordinator, 'word-1', 'next'),
+    true,
+  );
+  const availability = reviewGradeAvailability(coordinator, 'word-2');
+  assert.equal(
+    pronunciationMicrophoneDisabled(
+      true,
+      'idle',
+      false,
+      availability.automaticPending,
+    ),
+    true,
+  );
+
+  const rejected = await submitCoordinatedReviewGrade(
+    coordinator,
+    {
+      wordId: 'word-2',
+      source: 'voice',
+      advance: false,
+    },
+    async () => 'unexpected-save',
+  );
+  assert.deepEqual(rejected, { accepted: false });
+
+  save.resolve('saved');
+  await automatic;
+});
+
+test('delayed incorrect completion after navigation does not install a stale manual-grade lock', async () => {
+  const coordinator = createReviewGradeCoordinator();
+  const save = deferredPromise<string>();
+
+  resetReviewGradeCoordinatorForWord(coordinator, 'word-1');
+  const automatic = submitCoordinatedReviewGrade(
+    coordinator,
+    {
+      wordId: 'word-1',
+      source: 'voice',
+      advance: false,
+    },
+    () => save.promise,
+  );
+
+  assert.equal(
+    beginReviewGradeNavigation(coordinator, 'word-1', 'next'),
+    true,
+  );
+  resetReviewGradeCoordinatorForWord(coordinator, 'word-2');
+  save.resolve('saved');
+  await automatic;
+
+  resetReviewGradeCoordinatorForWord(coordinator, 'word-1');
+  assert.equal(
+    reviewGradeAvailability(coordinator, 'word-1').manualGradeDisabled,
+    false,
+  );
+});
+
+test('same-word incorrect completion still locks manual grading after persistence', async () => {
+  const coordinator = createReviewGradeCoordinator();
+  const save = deferredPromise<string>();
+
+  resetReviewGradeCoordinatorForWord(coordinator, 'word-1');
+  const automatic = submitCoordinatedReviewGrade(
+    coordinator,
+    {
+      wordId: 'word-1',
+      source: 'voice',
+      advance: false,
+    },
+    () => save.promise,
+  );
+
+  assert.equal(
+    reviewGradeAvailability(coordinator, 'word-1').manualGradeDisabled,
+    true,
+  );
+  save.resolve('saved');
+  await automatic;
+
+  assert.equal(
+    reviewGradeAvailability(coordinator, 'word-1').manualGradeDisabled,
+    true,
+  );
 });
 
 test('forward navigation consumes pending automatic advance and prevents completion UI on the next word', async () => {

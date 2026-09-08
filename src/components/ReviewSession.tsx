@@ -108,8 +108,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   }
 
   // 始终持有最新的 grade，供倒计时回调调用（避免把 grade 放进定时器依赖导致重置）
-  const gradeRef = useRef<(g: Grade, advance?: boolean) => Promise<void>>(
-    async () => {},
+  const gradeRef = useRef<(g: Grade, advance?: boolean) => Promise<boolean>>(
+    async () => false,
   );
 
   // 切换词或修改配置时重置倒计时。首次手动启动前，新词继续保持暂停。
@@ -151,8 +151,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     advance = true,
     source: ReviewGradeSource = 'manual',
     advanceAfterMs = 0,
-  ): Promise<void> {
-    if (!current) return;
+  ): Promise<boolean> {
+    if (!current) return false;
     const target = current;
 
     const todayStr = today();
@@ -175,7 +175,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
     };
 
     try {
-      await submitCoordinatedReviewGrade(
+      const result = await submitCoordinatedReviewGrade(
         gradeCoordinatorRef.current,
         {
           wordId: target.id,
@@ -210,9 +210,11 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
           if (source === 'manual') applyGradeUi(advance);
         },
       );
+      return result.accepted;
     } catch (e: unknown) {
       setSaveError(`「${target.text}」保存失败：${errorMessage(e, '请检查网络')}`);
       if (source === 'voice') throw e;
+      return false;
     }
   }
   gradeRef.current = grade;
@@ -510,6 +512,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
               onVoiceGrade={(voiceGrade, advance, advanceAfterMs) => (
                 grade(voiceGrade, advance, 'voice', advanceAfterMs)
               )}
+              automaticGradePending={gradeAvailability.automaticPending}
             />
           )}
 

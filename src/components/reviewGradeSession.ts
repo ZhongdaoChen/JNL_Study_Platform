@@ -5,6 +5,7 @@ export interface ReviewGradeCoordinator {
   automaticPendingWordId: string | null;
   forwardNavigatedWordIds: Set<string>;
   voiceLockedWordId: string | null;
+  currentWordId: string | null;
 }
 
 export interface ReviewGradeAvailability {
@@ -25,6 +26,7 @@ export function createReviewGradeCoordinator(): ReviewGradeCoordinator {
     automaticPendingWordId: null,
     forwardNavigatedWordIds: new Set<string>(),
     voiceLockedWordId: null,
+    currentWordId: null,
   };
 }
 
@@ -97,6 +99,7 @@ export function resetReviewGradeCoordinatorForWord(
   coordinator: ReviewGradeCoordinator,
   wordId: string | null,
 ): boolean {
+  coordinator.currentWordId = wordId;
   if (
     coordinator.voiceLockedWordId === null
     || coordinator.voiceLockedWordId === wordId
@@ -120,6 +123,7 @@ export function beginReviewGradeSubmission(
     return false;
   }
 
+  coordinator.currentWordId ??= wordId;
   coordinator.pendingWordIds.add(wordId);
   if (source === 'voice') {
     coordinator.automaticPendingWordId = wordId;
@@ -141,7 +145,13 @@ export function finishReviewGradeSubmission(
     committed: boolean;
   },
 ): void {
-  if (committed && source === 'voice' && !advance) {
+  if (
+    committed
+    && source === 'voice'
+    && !advance
+    && coordinator.currentWordId === wordId
+    && !coordinator.forwardNavigatedWordIds.has(wordId)
+  ) {
     coordinator.voiceLockedWordId = wordId;
   }
   coordinator.pendingWordIds.delete(wordId);
