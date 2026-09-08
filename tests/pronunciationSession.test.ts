@@ -67,9 +67,9 @@ test('an incorrect outcome reserves the first attempt until its grade is accepte
   assert.equal(gradedWordIds.has('word-1'), false);
   assert.equal(pendingSuccessWordIds.has('word-1'), true);
   assert.deepEqual(outcome, {
-    grade: 'forgotten',
-    advanceAfterMs: null,
-    message: '再试一次',
+    grade: 'fuzzy',
+    advanceAfterMs: 1200,
+    message: '读错了',
   });
 
   settlePronunciationOutcome(
@@ -111,7 +111,7 @@ test('a rejected coordinator submission does not consume the first pronunciation
       {
         wordId,
         source: 'voice',
-        advance: correct,
+        advance: true,
       },
       async () => 'unexpected-save',
     );
@@ -124,7 +124,7 @@ test('a rejected coordinator submission does not consume the first pronunciation
       );
     }
 
-    assert.equal(outcome.grade, correct ? 'mastered' : 'forgotten');
+    assert.equal(outcome.grade, correct ? 'mastered' : 'fuzzy');
     assert.deepEqual(rejected, { accepted: false });
     assert.equal(isFirstPronunciationAttempt(gradedWordIds, wordId), true);
   }
@@ -148,7 +148,7 @@ test('a correct outcome stays pending until its delayed grade is submitted', () 
   assert.equal(pendingSuccessWordIds.has('word-1'), true);
   assert.deepEqual(outcome, {
     grade: 'mastered',
-    advanceAfterMs: 1200,
+    advanceAfterMs: 2000,
     message: '读对了',
   });
 
@@ -197,9 +197,9 @@ test('canceling a pending correct outcome preserves the first-attempt grade', ()
   assert.deepEqual(
     beginPronunciationOutcome(gradedWordIds, pendingSuccessWordIds, 'word-1', false),
     {
-      grade: 'forgotten',
-      advanceAfterMs: null,
-      message: '再试一次',
+      grade: 'fuzzy',
+      advanceAfterMs: 1200,
+      message: '读错了',
     },
   );
 });
@@ -260,16 +260,16 @@ test('merging a generated sentence changes only that field on every matching que
 test('the first correct result is mastered and advances after the success animation', () => {
   assert.deepEqual(pronunciationOutcome(false, true), {
     grade: 'mastered',
-    advanceAfterMs: 1200,
+    advanceAfterMs: 2000,
     message: '读对了',
   });
 });
 
-test('the first incorrect result is forgotten and stays on the word', () => {
+test('the first incorrect result is fuzzy and advances after brief feedback', () => {
   assert.deepEqual(pronunciationOutcome(false, false), {
-    grade: 'forgotten',
-    advanceAfterMs: null,
-    message: '再试一次',
+    grade: 'fuzzy',
+    advanceAfterMs: 1200,
+    message: '读错了',
   });
 });
 

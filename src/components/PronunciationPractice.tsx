@@ -39,7 +39,7 @@ export interface PronunciationPracticeProps {
   word: Word;
   onExamplesChanged(wordId: string, examples: string[]): void;
   onVoiceGrade(
-    grade: 'mastered' | 'forgotten',
+    grade: 'mastered' | 'fuzzy',
     advance: boolean,
     advanceAfterMs: number,
   ): Promise<boolean>;
@@ -268,20 +268,6 @@ export default function PronunciationPractice({
     word.id,
   ]);
 
-  useEffect(() => {
-    if (
-      uiWordId !== word.id
-      || status !== 'incorrect'
-      || currentWordIdRef.current !== word.id
-    ) {
-      return;
-    }
-    void ensureSynthesisUrls(
-      word.id,
-      pronunciationPlaybackItems(word.text, examples),
-    );
-  }, [ensureSynthesisUrls, examples, status, uiWordId, word.id, word.text]);
-
   function retryExamples() {
     void generateExamples(wordRef.current);
   }
@@ -397,25 +383,8 @@ export default function PronunciationPractice({
       setStatus(assessment.correct ? 'correct' : 'incorrect');
       setFeedback(outcome.message);
 
-      if (outcome.grade === 'forgotten') {
-        try {
-          const accepted = await onVoiceGradeRef.current('forgotten', false, 0);
-          settlePronunciationOutcome(
-            gradedWordIdsRef.current,
-            pendingSuccessWordIdsRef.current,
-            wordId,
-            accepted,
-          );
-        } catch (error) {
-          settlePronunciationOutcome(
-            gradedWordIdsRef.current,
-            pendingSuccessWordIdsRef.current,
-            wordId,
-            false,
-          );
-          throw error;
-        }
-      } else if (outcome.grade === 'mastered' && outcome.advanceAfterMs !== null) {
+      // 读对（熟练）和读错（略陌生）都在短暂反馈后自动进入下一个词。
+      if (outcome.grade !== null && outcome.advanceAfterMs !== null) {
         setAdvancePending(true);
         pendingAdvanceWordIdRef.current = wordId;
         const shouldSubmit = (
@@ -426,7 +395,7 @@ export default function PronunciationPractice({
         if (shouldSubmit) {
           try {
             const accepted = await onVoiceGradeRef.current(
-              'mastered',
+              outcome.grade,
               true,
               outcome.advanceAfterMs,
             );
@@ -461,11 +430,6 @@ export default function PronunciationPractice({
             setAdvancePending(false);
           }
         }
-      }
-
-      if (!assessment.correct) {
-        const items = pronunciationPlaybackItems(target, examplesForWord(wordId));
-        void ensureSynthesisUrls(wordId, items);
       }
     } catch (error: unknown) {
       if (isCurrentRequest(recordingRequestRef, recordingRequestId, wordId)) {
@@ -650,7 +614,7 @@ export default function PronunciationPractice({
         role={visibleStatus === 'error' ? 'alert' : 'status'}
         aria-live="polite"
       >
-        {visibleFeedback ?? '点一下麦克风，读出上面的内容'}
+        {visibleFeedback}
       </div>
 
       {visibleStatus === 'correct' && (

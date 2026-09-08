@@ -13,11 +13,15 @@ export function isFirstPronunciationAttempt(
   return !gradedWordIds.has(wordId);
 }
 
+// 读对后烟花庆祝动画的展示时长；读错只短暂提示「读错了」再继续。
+export const PRONUNCIATION_SUCCESS_FEEDBACK_MS = 2000;
+export const PRONUNCIATION_INCORRECT_FEEDBACK_MS = 1200;
+
 export function pronunciationOutcome(
   alreadyGraded: boolean,
   correct: boolean,
 ): {
-  grade: 'mastered' | 'forgotten' | null;
+  grade: 'mastered' | 'fuzzy' | null;
   advanceAfterMs: number | null;
   message: string;
 } {
@@ -28,9 +32,19 @@ export function pronunciationOutcome(
       message: correct ? '这次读对了' : '再试一次',
     };
   }
+  // 中文读全自动评分：第一遍读对按「熟练」继续，第一遍读错按「略陌生」继续，
+  // 不再停留当前词，也不产生「彻底陌生」的当天补做。
   return correct
-    ? { grade: 'mastered', advanceAfterMs: 1200, message: '读对了' }
-    : { grade: 'forgotten', advanceAfterMs: null, message: '再试一次' };
+    ? {
+        grade: 'mastered',
+        advanceAfterMs: PRONUNCIATION_SUCCESS_FEEDBACK_MS,
+        message: '读对了',
+      }
+    : {
+        grade: 'fuzzy',
+        advanceAfterMs: PRONUNCIATION_INCORRECT_FEEDBACK_MS,
+        message: '读错了',
+      };
 }
 
 export function beginPronunciationOutcome(

@@ -356,49 +356,49 @@ button {
 }
 .pronunciation-fireworks span {
   --firework-x: 0px;
-  --firework-y: -34px;
+  --firework-y: -64px;
   position: absolute;
-  width: 7px;
-  height: 7px;
-  margin: -3px;
+  width: 13px;
+  height: 13px;
+  margin: -6px;
   border-radius: 50%;
   background: #18a558;
-  box-shadow: 0 0 0 2px rgba(24, 165, 88, 0.12);
-  animation: pronunciation-firework 820ms ease-out both;
+  box-shadow: 0 0 0 4px rgba(24, 165, 88, 0.14);
+  animation: pronunciation-firework 1800ms ease-out both;
 }
 .pronunciation-fireworks span:nth-child(2) {
-  --firework-x: 27px;
-  --firework-y: -25px;
+  --firework-x: 50px;
+  --firework-y: -46px;
   background: #5b6cff;
 }
 .pronunciation-fireworks span:nth-child(3) {
-  --firework-x: 38px;
-  --firework-y: 2px;
+  --firework-x: 70px;
+  --firework-y: 4px;
   background: #f0a500;
 }
 .pronunciation-fireworks span:nth-child(4) {
-  --firework-x: 24px;
-  --firework-y: 27px;
+  --firework-x: 45px;
+  --firework-y: 50px;
   background: #18a558;
 }
 .pronunciation-fireworks span:nth-child(5) {
   --firework-x: 0px;
-  --firework-y: 36px;
+  --firework-y: 67px;
   background: #5b6cff;
 }
 .pronunciation-fireworks span:nth-child(6) {
-  --firework-x: -25px;
-  --firework-y: 27px;
+  --firework-x: -46px;
+  --firework-y: 50px;
   background: #f0a500;
 }
 .pronunciation-fireworks span:nth-child(7) {
-  --firework-x: -38px;
-  --firework-y: 1px;
+  --firework-x: -70px;
+  --firework-y: 2px;
   background: #18a558;
 }
 .pronunciation-fireworks span:nth-child(8) {
-  --firework-x: -27px;
-  --firework-y: -25px;
+  --firework-x: -50px;
+  --firework-y: -46px;
   background: #5b6cff;
 }
 @keyframes pronunciation-listening-pulse {
@@ -411,10 +411,11 @@ button {
 }
 @keyframes pronunciation-firework {
   0% { opacity: 0; transform: translate(0, 0) scale(0.4); }
-  20% { opacity: 1; }
+  15% { opacity: 1; }
+  70% { opacity: 1; }
   100% {
     opacity: 0;
-    transform: translate(var(--firework-x), var(--firework-y)) scale(1);
+    transform: translate(var(--firework-x), var(--firework-y)) scale(1.35);
   }
 }
 .context {

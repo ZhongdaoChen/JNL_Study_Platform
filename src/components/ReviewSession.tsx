@@ -60,6 +60,8 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
   const gradeCoordinatorRef = useRef(createReviewGradeCoordinator());
   const currentWordIdRef = useRef<string | null>(null);
   const [, refreshGradeActions] = useState(0);
+  // 中文读改为发音练习全自动评分：不显示手动评分按钮，也停用 A/S/D/F 快捷键。
+  const pronunciationEnabled = lang === 'zh' && !spellingOnly;
 
   useEffect(() => {
     let active = true;
@@ -377,7 +379,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         code: event.code,
         target: event.target,
         repeat: event.repeat,
-        hasCurrentWord: Boolean(current) && !(
+        hasCurrentWord: Boolean(current) && !pronunciationEnabled && !(
           current
           && reviewGradeAvailability(
             gradeCoordinatorRef.current,
@@ -406,11 +408,10 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [countdownSec, current, togglePause]);
+  }, [countdownSec, current, pronunciationEnabled, togglePause]);
 
   const unit = lang === 'zh' ? '字' : '单词';
   const modeLabel = spellingOnly ? (lang === 'zh' ? '会写' : '拼写') : '复习';
-  const pronunciationEnabled = lang === 'zh' && !spellingOnly;
   // 当前词实际倒计时：三个单词及以上的词组翻倍（见 reviewCountdown.ts）
   const activeCountdownSec = current ? countdownSecForWord(countdownSec, current.text) : countdownSec;
 
@@ -582,36 +583,38 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         );
       })()}
 
-      <div className="grade-buttons">
-        <button
-          className="g-instant"
-          onClick={(event) => gradeFromButton('instant', event.currentTarget)}
-          disabled={gradeAvailability.manualGradeDisabled}
-        >
-          A · {instantLabel}
-        </button>
-        <button
-          className="g-mastered"
-          onClick={(event) => gradeFromButton('mastered', event.currentTarget)}
-          disabled={gradeAvailability.manualGradeDisabled}
-        >
-          S · {GRADE_LABELS.mastered}
-        </button>
-        <button
-          className="g-fuzzy"
-          onClick={(event) => gradeFromButton('fuzzy', event.currentTarget)}
-          disabled={gradeAvailability.manualGradeDisabled}
-        >
-          D · {GRADE_LABELS.fuzzy}
-        </button>
-        <button
-          className="g-forgotten"
-          onClick={(event) => gradeFromButton('forgotten', event.currentTarget)}
-          disabled={gradeAvailability.manualGradeDisabled}
-        >
-          F · {GRADE_LABELS.forgotten}
-        </button>
-      </div>
+      {!pronunciationEnabled && (
+        <div className="grade-buttons">
+          <button
+            className="g-instant"
+            onClick={(event) => gradeFromButton('instant', event.currentTarget)}
+            disabled={gradeAvailability.manualGradeDisabled}
+          >
+            A · {instantLabel}
+          </button>
+          <button
+            className="g-mastered"
+            onClick={(event) => gradeFromButton('mastered', event.currentTarget)}
+            disabled={gradeAvailability.manualGradeDisabled}
+          >
+            S · {GRADE_LABELS.mastered}
+          </button>
+          <button
+            className="g-fuzzy"
+            onClick={(event) => gradeFromButton('fuzzy', event.currentTarget)}
+            disabled={gradeAvailability.manualGradeDisabled}
+          >
+            D · {GRADE_LABELS.fuzzy}
+          </button>
+          <button
+            className="g-forgotten"
+            onClick={(event) => gradeFromButton('forgotten', event.currentTarget)}
+            disabled={gradeAvailability.manualGradeDisabled}
+          >
+            F · {GRADE_LABELS.forgotten}
+          </button>
+        </div>
+      )}
 
       {saveError && <p className="example-error">{saveError}</p>}
     </div>
