@@ -893,22 +893,29 @@ test('synthesis upgrades a documented signed DashScope OSS HTTP URL to HTTPS', a
   });
 });
 
-test('synthesis accepts documented HTTPS DashScope OSS result hosts', async () => {
-  const signedUrl =
-    'https://dashscope-result-wlcb.oss-cn-wulanchabu.aliyuncs.com/audio.wav'
-    + '?Expires=1766116806&OSSAccessKeyId=test&Signature=signed';
+test('synthesis accepts dynamically assigned DashScope OSS result buckets', async () => {
+  const trustedHosts = [
+    'dashscope-result-wlcb.oss-cn-wulanchabu.aliyuncs.com',
+    // 实测线上返回的动态桶名（2026-09），固定白名单曾把它误判为不可信。
+    'dashscope-a717.oss-cn-beijing.aliyuncs.com',
+  ];
 
-  await withServerEnvironment((async () => jsonResponse({
-    output: { audio: { url: signedUrl } },
-  })) as typeof fetch, async () => {
-    assert.deepEqual(await invokeHandler(synthesizePronunciation, {
-      method: 'POST',
-      body: { text: '中国' },
-    }), {
-      status: 200,
-      body: { audioUrl: signedUrl },
+  for (const host of trustedHosts) {
+    const signedUrl = `https://${host}/audio.wav`
+      + '?Expires=1766116806&OSSAccessKeyId=test&Signature=signed';
+
+    await withServerEnvironment((async () => jsonResponse({
+      output: { audio: { url: signedUrl } },
+    })) as typeof fetch, async () => {
+      assert.deepEqual(await invokeHandler(synthesizePronunciation, {
+        method: 'POST',
+        body: { text: '中国' },
+      }), {
+        status: 200,
+        body: { audioUrl: signedUrl },
+      }, host);
     });
-  });
+  }
 });
 
 test('synthesis rejects untrusted or malformed result URLs without leaking them', async () => {
@@ -916,7 +923,10 @@ test('synthesis rejects untrusted or malformed result URLs without leaking them'
     'https://cdn.example.com/pronunciation.wav',
     'http://upstream-secret.example/audio.wav',
     'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com.evil.example/audio.wav',
+    'https://dashscope-a717.oss-cn-beijing.aliyuncs.com.evil.example/audio.wav',
     'https://evil.oss-cn-beijing.aliyuncs.com/audio.wav',
+    'https://notdashscope-a717.oss-cn-beijing.aliyuncs.com/audio.wav',
+    'https://dashscopeevil.oss-cn-beijing.aliyuncs.com/audio.wav',
     'https://user:password@dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav',
     'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com:444/audio.wav',
     'ftp://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav',

@@ -18,10 +18,12 @@ const TTS_MODEL = 'qwen3-tts-instruct-flash';
 const TTS_VOICE = process.env.QWEN_TTS_VOICE ?? 'Cherry';
 const TTS_INSTRUCTIONS =
   '用标准普通话朗读，发音清晰、自然、亲切，语速适中，适合儿童跟读模仿，不带任何方言口音。';
-const TRUSTED_TTS_RESULT_HOSTS = new Set([
-  'dashscope-result-bj.oss-cn-beijing.aliyuncs.com',
-  'dashscope-result-wlcb.oss-cn-wulanchabu.aliyuncs.com',
-]);
+// DashScope 的结果 OSS 桶是动态分配的：实测除 dashscope-result-bj/wlcb 外，
+// 还返回过 dashscope-a717.oss-cn-beijing 这类桶名，固定主机名清单会误杀
+// 合法结果（线上 502「语音合成结果无效」的根因）。改为严格模式：只允许
+// dashscope 前缀、.aliyuncs.com 结尾的 OSS 桶域名，仍然排除任意第三方主机。
+const TRUSTED_TTS_RESULT_HOST_RE =
+  /^dashscope(?:-result)?-[a-z0-9-]+\.oss-[a-z0-9-]+\.aliyuncs\.com$/;
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method !== 'POST') {
@@ -83,12 +85,19 @@ async function handleAuthorizedSynthesis(
     );
 
     if (!upstream.ok) {
+      console.error('synthesis upstream rejected', JSON.stringify({
+        status: upstream.status,
+      }));
       res.status(502).json({ error: '语音合成服务暂时不可用' });
       return;
     }
 
     const audioUrl = extractTrustedAudioUrl(upstreamData);
     if (!audioUrl) {
+      // 只记录主机名用于排障；带签名的完整 URL 不落日志。
+      console.error('synthesis result url rejected', JSON.stringify({
+        host: resultUrlHost(upstreamData),
+      }));
       res.status(502).json({ error: '语音合成结果无效' });
       return;
     }
@@ -100,6 +109,19 @@ async function handleAuthorizedSynthesis(
       return;
     }
     res.status(502).json({ error: '语音合成服务暂时不可用' });
+  }
+}
+
+function resultUrlHost(value: unknown): string {
+  const url = isRecord(value) && isRecord(value.output) && isRecord(value.output.audio)
+    && typeof value.output.audio.url === 'string'
+    ? value.output.audio.url
+    : null;
+  if (url === null) return 'missing';
+  try {
+    return new URL(url.trim()).hostname.toLowerCase();
+  } catch {
+    return 'unparseable';
   }
 }
 
@@ -118,7 +140,7 @@ function extractTrustedAudioUrl(value: unknown): string | null {
     const url = new URL(rawUrl);
     if (
       (url.protocol !== 'http:' && url.protocol !== 'https:')
-      || !TRUSTED_TTS_RESULT_HOSTS.has(url.hostname.toLowerCase())
+      || !TRUSTED_TTS_RESULT_HOST_RE.test(url.hostname.toLowerCase())
       || url.username
       || url.password
       || url.port
