@@ -57,6 +57,7 @@ function makeWord(overrides: Partial<Word>): Word {
     firstLearnedAt: today(),
     needsSpelling: true,
     exampleSentence: null,
+    pronunciationExamples: [],
     interval: 1,
     ef: 2.5,
     repetitions: 0,
@@ -124,6 +125,8 @@ test('new words default to needsSpelling=true', async () => {
   const { newWords } = await addLearning(repo, 'child-1', 'cat, dog', 'en');
   assert.deepEqual(newWords, ['cat', 'dog']);
   assert.ok(repo.words.every((w) => w.needsSpelling === true));
+  assert.ok(repo.words.every((w) => Array.isArray(w.pronunciationExamples)));
+  assert.ok(repo.words.every((w) => w.pronunciationExamples.length === 0));
 });
 
 // 30 个逾期 10 天、已复习过的积压词

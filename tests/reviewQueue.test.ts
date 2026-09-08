@@ -14,6 +14,7 @@ function makeWord(overrides: Partial<Word>): Word {
     firstLearnedAt: today(),
     needsSpelling: true,
     exampleSentence: null,
+    pronunciationExamples: [],
     interval: 1,
     ef: 2.5,
     repetitions: 0,

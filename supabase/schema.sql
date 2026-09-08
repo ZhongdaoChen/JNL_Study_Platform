@@ -33,6 +33,7 @@ create table if not exists words (
   sentence_ids uuid[] not null default '{}',
   first_learned_at timestamptz not null default now(),
   example_sentence text,
+  pronunciation_examples text[] not null default '{}',
   needs_spelling boolean not null default true,
   interval int not null default 1,
   ef real not null default 2.5,
@@ -54,6 +55,7 @@ create table if not exists words (
 
 -- 兼容旧库：若 words 表已存在但缺少这些列，补上（安全幂等）
 alter table words add column if not exists example_sentence text;
+alter table words add column if not exists pronunciation_examples text[] not null default '{}';
 alter table words add column if not exists lang text not null default 'en';
 alter table words add column if not exists needs_spelling boolean not null default true;
 alter table words add column if not exists spelling_interval int not null default 0;
@@ -369,7 +371,8 @@ begin
 
       if not found then
         insert into words(
-          child_id, text, lang, sentence_ids, first_learned_at, example_sentence, needs_spelling,
+          child_id, text, lang, sentence_ids, first_learned_at, example_sentence,
+          pronunciation_examples, needs_spelling,
           interval, ef, repetitions, due_date, last_grade, last_reviewed_at, pending_retry_count,
           volatility_rate,
           spelling_interval, spelling_ef, spelling_repetitions, spelling_due_date,
@@ -377,7 +380,7 @@ begin
         )
         values (
           target_child_id, src_word.text, src_word.lang, mapped_sentence_ids, src_word.first_learned_at,
-          src_word.example_sentence, src_word.needs_spelling,
+          src_word.example_sentence, src_word.pronunciation_examples, src_word.needs_spelling,
           src_word.interval, src_word.ef, src_word.repetitions, src_word.due_date,
           src_word.last_grade, src_word.last_reviewed_at, src_word.pending_retry_count,
           src_word.volatility_rate,
@@ -421,6 +424,12 @@ begin
           ),
           first_learned_at = least(existing_word.first_learned_at, src_word.first_learned_at),
           example_sentence = coalesce(existing_word.example_sentence, src_word.example_sentence),
+          pronunciation_examples =
+            case
+              when cardinality(existing_word.pronunciation_examples) > 0
+                then existing_word.pronunciation_examples
+              else src_word.pronunciation_examples
+            end,
           -- needs_spelling 是「排除」标记（false=拼写复习页删除过）：任一方删除过即保持排除
           needs_spelling = existing_word.needs_spelling and src_word.needs_spelling,
           interval = greatest(existing_word.interval, src_word.interval),

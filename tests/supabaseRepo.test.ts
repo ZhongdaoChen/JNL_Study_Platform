@@ -87,6 +87,23 @@ test('getWords returns everything when exactly at one page', async () => {
   assert.equal(result.length, PAGE_LIMIT);
 });
 
+test('getWords maps pronunciation examples and falls back for older rows', async () => {
+  const repo = makeRepo({
+    words: [
+      {
+        ...makeWordRow(1, 'child-1'),
+        pronunciation_examples: ['中国', '中午', '中间'],
+      },
+      makeWordRow(2, 'child-1'),
+    ],
+  });
+
+  const result = await repo.getWords('child-1');
+
+  assert.deepEqual(result[0].pronunciationExamples, ['中国', '中午', '中间']);
+  assert.deepEqual(result[1].pronunciationExamples, []);
+});
+
 test('getSentences paginates past the 1000-row limit', async () => {
   const sentences = Array.from({ length: 1500 }, (_, i) => ({
     id: `s-${i}`,

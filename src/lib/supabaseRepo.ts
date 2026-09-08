@@ -45,6 +45,9 @@ function rowToWord(r: any): Word {
     firstLearnedAt: r.first_learned_at,
     needsSpelling: r.needs_spelling ?? true,
     exampleSentence: r.example_sentence ?? null,
+    pronunciationExamples: Array.isArray(r.pronunciation_examples)
+      ? r.pronunciation_examples.filter((item: unknown): item is string => typeof item === 'string')
+      : [],
     interval: r.interval,
     ef: r.ef,
     repetitions: r.repetitions,
@@ -147,6 +150,7 @@ export class SupabaseRepo implements Repo {
       first_learned_at: word.firstLearnedAt,
       needs_spelling: word.needsSpelling,
       example_sentence: word.exampleSentence,
+      pronunciation_examples: word.pronunciationExamples,
       interval: word.interval,
       ef: word.ef,
       repetitions: word.repetitions,
