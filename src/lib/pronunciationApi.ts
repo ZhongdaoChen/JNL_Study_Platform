@@ -128,7 +128,10 @@ async function fetchJsonWithTimeout(
     let data: unknown;
     try {
       data = await response.json();
-    } catch {
+    } catch (error) {
+      if (timedOut || isAbortError(error)) {
+        throw new Error(timeoutMessage, { cause: error });
+      }
       if (!response.ok) throw new Error(failureMessage);
       throw new Error(invalidMessage);
     }

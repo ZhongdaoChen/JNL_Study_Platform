@@ -113,3 +113,32 @@ test('a hanging assessment request rejects with the assessment timeout message',
     restore();
   }
 });
+
+test('assessment returns the timeout message when json hangs until abort', { timeout: 100 }, async () => {
+  const restore = withMockedFetch((async (_input, init) => {
+    const signal = init?.signal;
+    assert.ok(signal instanceof AbortSignal);
+
+    return {
+      ok: true,
+      json() {
+        return new Promise((_, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('The operation was aborted.', 'AbortError')),
+            { once: true },
+          );
+        });
+      },
+    } as Response;
+  }) as typeof fetch);
+
+  try {
+    await assert.rejects(
+      () => assessPronunciation('中', new Blob([new Uint8Array([1])], { type: 'audio/webm' }), { timeoutMs: 10 }),
+      /发音评估超时，请稍后重试/,
+    );
+  } finally {
+    restore();
+  }
+});
