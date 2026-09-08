@@ -1,6 +1,5 @@
 import {
   DASH_SCOPE_CHAT_COMPLETIONS_URL,
-  DASH_SCOPE_MULTIMODAL_URL,
   type AudioRequest,
   type ApiRequest,
   type ApiResponse,
@@ -21,44 +20,34 @@ import {
   withPronunciationSecurity,
 } from './pronunciationSecurity.js';
 
-const ASSESS_MODEL =
-  process.env.QWEN_PRONUNCIATION_MODEL ?? 'qwen-audio-3.0-asr-flash';
-const DIRECT_ASSESS_MODEL = 'qwen3.5-omni-plus';
+// 单阶段评估：一次调用同时完成转写与发音判定。模型固定，避免部署配置漂移。
+const ASSESS_MODEL = 'qwen3.5-omni-flash';
 const HIGH_CONFIDENCE_THRESHOLD = 0.9;
+const MAX_RECOGNIZED_TEXT_CHARACTERS = 120;
 const PINYIN_RE = /^[a-züvāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]+[1-5]?$/iu;
 
 interface PronunciationJudgment {
   status: 'correct' | 'incorrect' | 'unclear';
   confidence: number;
   acceptedReading: string | null;
+  recognizedText: string;
 }
 
-interface AsrTranscript {
-  text: string;
-  words: string[];
-}
-
-export function pronunciationJudgmentPrompt(
-  target: string,
-  transcript: AsrTranscript,
-): string {
+export function pronunciationJudgmentPrompt(target: string): string {
   const singleCharacter = isSingleHanCharacter(target);
   return [
     '你是谨慎的儿童普通话发音核验器，必须直接听所附原始录音。',
-    '目标文本和自动转写只提供上下文；禁止只根据自动转写猜测结论。',
-    '只返回一个 JSON 对象，且只能有 status、confidence、acceptedReading 三个字段。',
-    'status 只能是 correct、incorrect 或 unclear；confidence 必须是 0 到 1 的数字。',
+    '第一步：把录音中实际听到的内容如实转写进 recognizedText（只写听到的汉字，没有听清人声就写空字符串）。',
+    '第二步：对照目标文本判断录音的内容和发音是否匹配。',
+    '只返回一个 JSON 对象，且只能有 recognizedText、status、confidence、acceptedReading 四个字段。',
+    'status 只能是 correct、incorrect 或 unclear；confidence 必须是 0 到 1 的数字；recognizedText 必须是字符串。',
     '只有录音清楚且能明确判断时才返回 correct 或 incorrect；噪声、截断、含糊或证据冲突都返回 unclear。',
     'incorrect 只用于原始录音明确读成了目标以外内容的情形，不确定时绝不能猜测。',
     singleCharacter
       ? '目标是单个汉字：该字任一常见现代普通话读音都算 correct；correct 时 acceptedReading 填写带声调拼音。'
       : '目标是词组或句子：核验整段内容和发音是否匹配；acceptedReading 必须为 null。',
     'incorrect 或 unclear 时 acceptedReading 必须为 null。',
-    JSON.stringify({
-      target,
-      recognizedText: transcript.text,
-      recognizedWords: transcript.words,
-    }),
+    JSON.stringify({ target }),
   ].join('\n');
 }
 
@@ -100,53 +89,6 @@ async function handleAuthorizedAssessment(
   try {
     const audioFormat = audioFormatForMimeType(request.mimeType);
     const audioDataUrl = `data:${request.mimeType};base64,${request.audioBase64}`;
-    const { response: asrResponse, data: asrData } = await context.fetchJson(
-      DASH_SCOPE_MULTIMODAL_URL,
-      {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'X-DashScope-SSE': 'disable',
-      },
-      body: JSON.stringify({
-        model: ASSESS_MODEL,
-        input: {
-          messages: [{
-            role: 'user',
-            content: [
-              {
-                type: 'input_audio',
-                input_audio: {
-                  data: audioDataUrl,
-                },
-              },
-            ],
-          }],
-        },
-        parameters: {
-          format: audioFormat,
-          language_hints: ['zh'],
-        },
-      }),
-      },
-    );
-
-    if (!asrResponse.ok) {
-      res.status(502).json({ error: '发音评估服务暂时不可用' });
-      return;
-    }
-
-    const transcript = parseAsrTranscript(asrData);
-    if (!transcript) {
-      res.status(502).json({ error: '发音评估结果无效' });
-      return;
-    }
-    if (!normalizeRecognizedChinese(transcript.text)) {
-      res.status(422).json({ error: '没有听清，请再试一次' });
-      return;
-    }
-
     const { response: judgmentResponse, data: judgmentStream } = await context.fetchText(
       DASH_SCOPE_CHAT_COMPLETIONS_URL,
       {
@@ -156,7 +98,7 @@ async function handleAuthorizedAssessment(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: DIRECT_ASSESS_MODEL,
+        model: ASSESS_MODEL,
         messages: [
           {
             role: 'system',
@@ -174,7 +116,7 @@ async function handleAuthorizedAssessment(
               },
               {
                 type: 'text',
-                text: pronunciationJudgmentPrompt(request.target, transcript),
+                text: pronunciationJudgmentPrompt(request.target),
               },
             ],
           },
@@ -188,7 +130,7 @@ async function handleAuthorizedAssessment(
           type: 'json_object',
         },
         temperature: 0,
-        max_tokens: 120,
+        max_tokens: 200,
       }),
       },
     );
@@ -210,6 +152,7 @@ async function handleAuthorizedAssessment(
     if (
       judgment.status === 'unclear'
       || judgment.confidence < HIGH_CONFIDENCE_THRESHOLD
+      || !normalizeRecognizedChinese(judgment.recognizedText)
     ) {
       res.status(422).json({ error: '没有听清，请再试一次' });
       return;
@@ -217,7 +160,7 @@ async function handleAuthorizedAssessment(
 
     res.status(200).json({
       correct: judgment.status === 'correct',
-      recognizedText: transcript.text,
+      recognizedText: judgment.recognizedText,
       acceptedReading: judgment.acceptedReading,
       confidence: judgment.confidence,
     });
@@ -228,26 +171,6 @@ async function handleAuthorizedAssessment(
     }
     res.status(502).json({ error: '发音评估服务暂时不可用' });
   }
-}
-
-function parseAsrTranscript(value: unknown): AsrTranscript | null {
-  if (!isRecord(value) || !isRecord(value.output)) {
-    return null;
-  }
-
-  const text = typeof value.output.text === 'string' ? value.output.text.trim() : null;
-  if (text === null) return null;
-
-  const sentence = isRecord(value.output.sentence) ? value.output.sentence : null;
-  const words = sentence && Array.isArray(sentence.words)
-    ? sentence.words.flatMap((word) => (
-        isRecord(word) && typeof word.text === 'string' && word.text.trim()
-          ? [word.text.trim()]
-          : []
-      ))
-    : [];
-
-  return { text, words };
 }
 
 function extractSseText(value: string): string | null {
@@ -287,15 +210,16 @@ function parsePronunciationJudgment(
 
   const keys = Object.keys(parsed).sort();
   if (
-    keys.length !== 3
+    keys.length !== 4
     || keys[0] !== 'acceptedReading'
     || keys[1] !== 'confidence'
-    || keys[2] !== 'status'
+    || keys[2] !== 'recognizedText'
+    || keys[3] !== 'status'
   ) {
     return null;
   }
 
-  const { status, confidence, acceptedReading } = parsed;
+  const { status, confidence, acceptedReading, recognizedText } = parsed;
   const singleCharacter = isSingleHanCharacter(target);
   if (
     (status !== 'correct' && status !== 'incorrect' && status !== 'unclear')
@@ -303,6 +227,8 @@ function parsePronunciationJudgment(
     || !Number.isFinite(confidence)
     || confidence < 0
     || confidence > 1
+    || typeof recognizedText !== 'string'
+    || recognizedText.trim().length > MAX_RECOGNIZED_TEXT_CHARACTERS
     || (
       acceptedReading !== null
       && (
@@ -330,5 +256,6 @@ function parsePronunciationJudgment(
     acceptedReading: typeof acceptedReading === 'string'
       ? acceptedReading.trim()
       : null,
+    recognizedText: recognizedText.trim(),
   };
 }

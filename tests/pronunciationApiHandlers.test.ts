@@ -224,28 +224,11 @@ test('every protected DashScope fetch aborts before lease expiry and releases it
     fetchImplementation: typeof fetch;
   }[] = [
     {
-      name: 'assessment ASR',
-      handler: assessPronunciation,
-      body: { target: '中国', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
-      expectedError: '发音评估超时，请稍后重试',
-      fetchImplementation: (async (_input, init) => hangsUntilAborted(init, () => {})) as typeof fetch,
-    },
-    {
-      name: 'assessment judgment',
+      name: 'assessment',
       handler: assessPronunciation,
       body: { target: '中', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
       expectedError: '发音评估超时，请稍后重试',
-      fetchImplementation: (async (input, init) => {
-        if (String(input) === DASH_SCOPE_MULTIMODAL_URL) {
-          return jsonResponse({
-            output: {
-              sentence: { sentence_end: true, text: '中' },
-              text: '中',
-            },
-          });
-        }
-        return hangsUntilAborted(init, () => {});
-      }) as typeof fetch,
+      fetchImplementation: (async (_input, init) => hangsUntilAborted(init, () => {})) as typeof fetch,
     },
     {
       name: 'helper examples',
@@ -428,7 +411,7 @@ test('validateAudioRequest accepts all supported browser audio types', () => {
   }
 });
 
-test('browser MIME types map to the documented Qwen Audio ASR format values', () => {
+test('browser MIME types map to the documented DashScope audio format values', () => {
   assert.equal(audioFormatForMimeType('audio/webm'), 'webm');
   assert.equal(audioFormatForMimeType('audio/webm;codecs=opus'), 'webm');
   assert.equal(audioFormatForMimeType('audio/mp4'), 'mp4');
@@ -489,33 +472,15 @@ test('invalid paid requests are rejected before acquiring provider capacity', as
   });
 });
 
-test('assessment uses ASR plus a documented direct-audio Qwen Omni JSON decision', async () => {
+test('assessment uses a single documented direct-audio Qwen Omni Flash JSON decision', async () => {
   const requests: { url: string; init?: RequestInit }[] = [];
 
   await withServerEnvironment((async (input, init) => {
-    const url = String(input);
-    requests.push({ url, init });
-    if (url === DASH_SCOPE_MULTIMODAL_URL) {
-      return jsonResponse({
-        output: {
-          sentence: {
-            sentence_end: true,
-            text: '中',
-            words: [{ text: '中', punctuation: '', fixed: true }],
-          },
-          text: '中',
-        },
-        usage: { duration: 1 },
-        request_id: 'asr-request-id',
-      });
-    }
-    if (url === DASH_SCOPE_CHAT_COMPLETIONS_URL) {
-      return sseResponse([
-        '{"status":"correct","confidence":',
-        '0.98,"acceptedReading":"zhòng"}',
-      ]);
-    }
-    return jsonResponse({}, 404);
+    requests.push({ url: String(input), init });
+    return sseResponse([
+      '{"recognizedText":"中","status":"correct","confidence":',
+      '0.98,"acceptedReading":"zhòng"}',
+    ]);
   }) as typeof fetch, async () => {
     const result = await invokeHandler(assessPronunciation, {
       method: 'POST',
@@ -531,45 +496,21 @@ test('assessment uses ASR plus a documented direct-audio Qwen Omni JSON decision
         confidence: 0.98,
       },
     });
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 1);
 
-    const asrRequest = requests[0];
-    assert.equal(asrRequest.url, DASH_SCOPE_MULTIMODAL_URL);
-    assert.equal(asrRequest.init?.method, 'POST');
+    const judgmentRequest = requests[0];
+    assert.equal(judgmentRequest.url, DASH_SCOPE_CHAT_COMPLETIONS_URL);
+    assert.equal(judgmentRequest.init?.method, 'POST');
     assert.equal(
-      (asrRequest.init?.headers as Record<string, string>).Authorization,
+      (judgmentRequest.init?.headers as Record<string, string>).Authorization,
       'Bearer server-test-key',
     );
-    assert.equal(
-      (asrRequest.init?.headers as Record<string, string>)['X-DashScope-SSE'],
-      'disable',
-    );
-    assert.deepEqual(JSON.parse(String(asrRequest.init?.body)), {
-      model: 'qwen-audio-3.0-asr-flash',
-      input: {
-        messages: [{
-          role: 'user',
-          content: [{
-            type: 'input_audio',
-            input_audio: {
-              data: `data:audio/wav;base64,${VALID_AUDIO_BASE64}`,
-            },
-          }],
-        }],
-      },
-      parameters: {
-        format: 'wav',
-        language_hints: ['zh'],
-      },
-    });
-
-    const judgmentRequest = requests[1];
-    assert.equal(judgmentRequest.url, DASH_SCOPE_CHAT_COMPLETIONS_URL);
     const judgmentBody = JSON.parse(String(judgmentRequest.init?.body));
-    assert.equal(judgmentBody.model, 'qwen3.5-omni-plus');
+    assert.equal(judgmentBody.model, 'qwen3.5-omni-flash');
     assert.equal(judgmentBody.stream, true);
     assert.deepEqual(judgmentBody.modalities, ['text']);
     assert.equal(judgmentBody.response_format.type, 'json_object');
+    assert.equal(judgmentBody.temperature, 0);
     assert.deepEqual(
       judgmentBody.messages[1].content[0],
       {
@@ -581,27 +522,17 @@ test('assessment uses ASR plus a documented direct-audio Qwen Omni JSON decision
       },
     );
     assert.match(judgmentBody.messages[1].content[1].text, /"target":"中"/);
-    assert.match(judgmentBody.messages[1].content[1].text, /"recognizedText":"中"/);
+    assert.match(judgmentBody.messages[1].content[1].text, /recognizedText/);
     assert.match(judgmentBody.messages[1].content[1].text, /任一常见现代普通话读音/);
   });
 });
 
-test('multi-character ASR mismatch uses original audio and can pass on a high-confidence direct decision', async () => {
+test('multi-character mismatch uses original audio and can pass on a high-confidence direct decision', async () => {
   let fetchCount = 0;
-  await withServerEnvironment((async (input) => {
+  await withServerEnvironment((async () => {
     fetchCount += 1;
-    if (String(input) === DASH_SCOPE_MULTIMODAL_URL) {
-      return jsonResponse({
-        output: {
-          sentence: { sentence_end: true, text: '忠国' },
-          text: '忠国',
-        },
-        usage: { duration: 1 },
-        request_id: 'asr-request-id',
-      });
-    }
     return sseResponse([
-      '{"status":"correct","confidence":0.97,"acceptedReading":null}',
+      '{"recognizedText":"忠国","status":"correct","confidence":0.97,"acceptedReading":null}',
     ]);
   }) as typeof fetch, async () => {
     const result = await invokeHandler(assessPronunciation, {
@@ -618,28 +549,16 @@ test('multi-character ASR mismatch uses original audio and can pass on a high-co
         confidence: 0.97,
       },
     });
-    assert.equal(fetchCount, 2);
+    assert.equal(fetchCount, 1);
   });
 });
 
 test('multi-character mismatch stays ungraded when the direct decision is unclear or low confidence', async () => {
   for (const judgment of [
-    '{"status":"unclear","confidence":0.99,"acceptedReading":null}',
-    '{"status":"incorrect","confidence":0.89,"acceptedReading":null}',
+    '{"recognizedText":"忠国","status":"unclear","confidence":0.99,"acceptedReading":null}',
+    '{"recognizedText":"忠国","status":"incorrect","confidence":0.89,"acceptedReading":null}',
   ]) {
-    await withServerEnvironment((async (input) => {
-      if (String(input) === DASH_SCOPE_MULTIMODAL_URL) {
-        return jsonResponse({
-          output: {
-            sentence: { sentence_end: true, text: '忠国' },
-            text: '忠国',
-          },
-          usage: { duration: 1 },
-          request_id: 'asr-request-id',
-        });
-      }
-      return sseResponse([judgment]);
-    }) as typeof fetch, async () => {
+    await withServerEnvironment((async () => sseResponse([judgment])) as typeof fetch, async () => {
       const result = await invokeHandler(assessPronunciation, {
         method: 'POST',
         body: {
@@ -658,21 +577,9 @@ test('multi-character mismatch stays ungraded when the direct decision is unclea
 });
 
 test('only an explicit high-confidence incorrect direct decision returns correct false', async () => {
-  await withServerEnvironment((async (input) => {
-    if (String(input) === DASH_SCOPE_MULTIMODAL_URL) {
-      return jsonResponse({
-        output: {
-          sentence: { sentence_end: true, text: '忠国' },
-          text: '忠国',
-        },
-        usage: { duration: 1 },
-        request_id: 'asr-request-id',
-      });
-    }
-    return sseResponse([
-      '{"status":"incorrect","confidence":0.9,"acceptedReading":null}',
-    ]);
-  }) as typeof fetch, async () => {
+  await withServerEnvironment((async () => sseResponse([
+    '{"recognizedText":"忠国","status":"incorrect","confidence":0.9,"acceptedReading":null}',
+  ])) as typeof fetch, async () => {
     const result = await invokeHandler(assessPronunciation, {
       method: 'POST',
       body: {
@@ -694,15 +601,10 @@ test('only an explicit high-confidence incorrect direct decision returns correct
   });
 });
 
-test('assessment maps an empty official ASR transcript to 422', async () => {
-  await withServerEnvironment((async () => jsonResponse({
-    output: {
-      sentence: { sentence_end: true, text: '' },
-      text: '',
-    },
-    usage: { duration: 1 },
-    request_id: 'asr-request-id',
-  })) as typeof fetch, async () => {
+test('assessment maps an empty recognized transcript to 422', async () => {
+  await withServerEnvironment((async () => sseResponse([
+    '{"recognizedText":"","status":"correct","confidence":0.99,"acceptedReading":null}',
+  ])) as typeof fetch, async () => {
     const result = await invokeHandler(assessPronunciation, {
       method: 'POST',
       body: { target: '中国', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
@@ -715,10 +617,10 @@ test('assessment maps an empty official ASR transcript to 422', async () => {
   });
 });
 
-test('assessment maps invalid and failed ASR responses to safe 502 errors', async () => {
+test('assessment maps invalid and failed upstream responses to safe 502 errors', async () => {
   for (const response of [
     jsonResponse({ secret: 'upstream-secret' }, 401),
-    jsonResponse({ output: { choices: [] } }),
+    sseResponse(['not-json']),
   ]) {
     await withServerEnvironment((async () => response) as typeof fetch, async () => {
       const result = await invokeHandler(assessPronunciation, {
@@ -737,21 +639,9 @@ test('assessment maps invalid and failed ASR responses to safe 502 errors', asyn
 });
 
 test('assessment rejects a polyphonic judgment with an invalid reading value', async () => {
-  await withServerEnvironment((async (input) => {
-    if (String(input) === DASH_SCOPE_MULTIMODAL_URL) {
-      return jsonResponse({
-        output: {
-          sentence: { sentence_end: true, text: '中' },
-          text: '中',
-        },
-        usage: { duration: 1 },
-        request_id: 'asr-request-id',
-      });
-    }
-    return sseResponse([
-      '{"status":"correct","confidence":0.99,"acceptedReading":"<script>"}',
-    ]);
-  }) as typeof fetch, async () => {
+  await withServerEnvironment((async () => sseResponse([
+    '{"recognizedText":"中","status":"correct","confidence":0.99,"acceptedReading":"<script>"}',
+  ])) as typeof fetch, async () => {
     const result = await invokeHandler(assessPronunciation, {
       method: 'POST',
       body: { target: '中', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
@@ -767,19 +657,10 @@ test('assessment rejects a polyphonic judgment with an invalid reading value', a
 test('assessment rejects non-strict direct decision objects', async () => {
   for (const judgment of [
     '{"status":"correct","acceptedReading":"zhōng"}',
-    '{"status":"correct","confidence":0.99,"acceptedReading":"zhōng","extra":true}',
+    '{"recognizedText":"中","status":"correct","acceptedReading":"zhōng"}',
+    '{"recognizedText":"中","status":"correct","confidence":0.99,"acceptedReading":"zhōng","extra":true}',
   ]) {
-    await withServerEnvironment((async (input) => {
-      if (String(input) === DASH_SCOPE_MULTIMODAL_URL) {
-        return jsonResponse({
-          output: {
-            sentence: { sentence_end: true, text: '中' },
-            text: '中',
-          },
-        });
-      }
-      return sseResponse([judgment]);
-    }) as typeof fetch, async () => {
+    await withServerEnvironment((async () => sseResponse([judgment])) as typeof fetch, async () => {
       const result = await invokeHandler(assessPronunciation, {
         method: 'POST',
         body: {
@@ -899,11 +780,14 @@ test('synthesis upgrades a documented signed DashScope OSS HTTP URL to HTTPS', a
     assert.equal(state.acquireBodies[0].p_operation, 'synthesis');
     const upstreamBody = JSON.parse(String(requestInit?.body));
     assert.deepEqual(upstreamBody, {
-      model: 'qwen3-tts-flash',
+      model: 'qwen3-tts-instruct-flash',
       input: {
         text: '中国',
         voice: 'Cherry',
         language_type: 'Chinese',
+        instructions:
+          '用标准普通话朗读，发音清晰、自然、亲切，语速适中，适合儿童跟读模仿，不带任何方言口音。',
+        optimize_instructions: true,
       },
     });
   });

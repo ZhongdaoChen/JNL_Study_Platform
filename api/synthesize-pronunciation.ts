@@ -13,8 +13,11 @@ import {
   withPronunciationSecurity,
 } from './pronunciationSecurity.js';
 
-const TTS_MODEL = 'qwen3-tts-flash';
+// instruct 版支持自然语言指令，配合 Cherry（官方标准普通话女声）消除短文本口音漂移。
+const TTS_MODEL = 'qwen3-tts-instruct-flash';
 const TTS_VOICE = process.env.QWEN_TTS_VOICE ?? 'Cherry';
+const TTS_INSTRUCTIONS =
+  '用标准普通话朗读，发音清晰、自然、亲切，语速适中，适合儿童跟读模仿，不带任何方言口音。';
 const TRUSTED_TTS_RESULT_HOSTS = new Set([
   'dashscope-result-bj.oss-cn-beijing.aliyuncs.com',
   'dashscope-result-wlcb.oss-cn-wulanchabu.aliyuncs.com',
@@ -70,6 +73,8 @@ async function handleAuthorizedSynthesis(
           text,
           voice: TTS_VOICE,
           language_type: 'Chinese',
+          instructions: TTS_INSTRUCTIONS,
+          optimize_instructions: true,
         },
       }),
       },

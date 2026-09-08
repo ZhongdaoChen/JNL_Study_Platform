@@ -16,7 +16,7 @@
 ## 技术栈
 - 前端：React + TypeScript + Vite（纯静态，PWA 方向）
 - 后端：Supabase（Postgres + Auth + RLS 行级安全多用户隔离）
-- AI / 语音：Vercel Serverless 代理调用通义千问（qwen-turbo）、Qwen-Image-2.0、Qwen-Audio-3.0-ASR-Flash、Qwen3.5-Omni-Plus 和 qwen3-tts-flash
+- AI / 语音：Vercel Serverless 代理调用通义千问（qwen-turbo）、Qwen-Image-2.0、Qwen3.5-Omni-Flash（发音评估）和 qwen3-tts-instruct-flash（标准普通话示例朗读）
 - 存储模式：配置了 Supabase env 时走云端同步，否则自动回退到浏览器本地存储，可立即试用。
 
 ## 本地运行
@@ -39,7 +39,7 @@ npm run dev
 - `src/lib/userSettings.ts` / `dataShare.ts` — 用户配置云端同步与账户间数据共享
 - `src/lib/admin.ts` / `changelog.ts` — 管理员 RPC 与版本日志
 - `src/components/` — 各功能模块界面（AuthGate / Workspace / 录入 / 复习 / 中文发音练习 / 总览 / 统计 / 配置 / 管理员）
-- `api/generate-sentence.ts` / `api/generate-image.ts` / `api/assess-pronunciation.ts` / `api/generate-pronunciation-examples.ts` / `api/synthesize-pronunciation.ts` — Vercel Serverless：服务端代理通义千问文本、图片、发音评估、辅助词和标准读音生成（共读 `QWEN_API_KEY`；发音评估使用同步 `qwen-audio-3.0-asr-flash` 转写，并由固定的 `qwen3.5-omni-plus` 通过 OpenAI 兼容 Chat Completions 流式协议直接读取原始录音、返回 JSON Object，再由服务端严格校验状态与置信度；TTS 固定为 `qwen3-tts-flash`，音色默认 `Cherry`）
+- `api/generate-sentence.ts` / `api/generate-image.ts` / `api/assess-pronunciation.ts` / `api/generate-pronunciation-examples.ts` / `api/synthesize-pronunciation.ts` — Vercel Serverless：服务端代理通义千问文本、图片、发音评估、辅助词和标准读音生成（共读 `QWEN_API_KEY`；发音评估单阶段调用固定的 `qwen3.5-omni-flash`，通过 OpenAI 兼容 Chat Completions 流式协议直接读取原始录音，一次返回转写文本 + JSON 判定，再由服务端严格校验状态与置信度；TTS 固定为 `qwen3-tts-instruct-flash` 并携带标准普通话指令，音色默认 `Cherry`）
 - `api/pronunciationSecurity.ts` — 校验 Supabase Session Bearer Token，并通过 Supabase RPC 实施跨 Vercel 实例的用户/IP 频率与并发限制
 - `supabase/schema.sql` — 数据库结构 + RLS 多用户策略 + 管理员 / 数据共享 / 语音限流 RPC（幂等，可重复执行）
 
@@ -47,7 +47,7 @@ npm run dev
 1. 在 supabase.com 新建项目。
 2. 在 SQL Editor 执行 `supabase/schema.sql`（升级后需重跑，幂等不丢数据），创建 `children / sentences / words / review_logs / feedback / user_settings`、语音请求限流表，以及管理员、数据共享、语音限流 RPC。已上线旧库必须先重跑 schema，再部署新版 Serverless 函数；否则发音接口会按设计关闭并返回 503。语音限流 RPC 只授予 `service_role`，`public / anon / authenticated` 均无执行权限。
 3. 复制 `.env.example` 为 `.env.local`，填入 `VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`，并只在服务端环境配置 `SUPABASE_SERVICE_ROLE_KEY` 和 `QWEN_API_KEY`（两者都绝不能加 `VITE_` 前缀）。浏览器 bearer token 只用于向 Supabase Auth 验证身份；验证成功后，Serverless 才会用 service-role key 和已验证的用户 ID 调用限流 RPC。缺少 service-role key 时发音接口会失败关闭并返回 503。
-4. 如需覆盖 ASR 模型或 TTS 音色，可选填 `QWEN_PRONUNCIATION_MODEL`、`QWEN_TTS_VOICE`。直接音频判断模型固定为 `qwen3.5-omni-plus`，TTS 模型固定为 `qwen3-tts-flash`，避免部署配置与安全策略漂移。`PRONUNCIATION_RATE_LIMIT_SECRET` 可单独设置 IP 指纹密钥；`PRONUNCIATION_SECURITY_TIMEOUT_MS` 和 `PRONUNCIATION_UPSTREAM_TIMEOUT_MS` 可调整服务端超时。每类操作的用户/IP频率、并发、30 秒租约以及 synthesis 的账户级 `dashscope-tts / qwen3-tts-flash` 滚动限制（3 次/秒、180 次/分钟）均硬编码在 SQL，调用方不能覆盖。上游 deadline 按 RPC 返回的实际剩余租约计算并预留安全余量。
+4. 如需覆盖 TTS 音色，可选填 `QWEN_TTS_VOICE`。发音评估模型固定为 `qwen3.5-omni-flash`，TTS 模型固定为 `qwen3-tts-instruct-flash`，避免部署配置与安全策略漂移。`PRONUNCIATION_RATE_LIMIT_SECRET` 可单独设置 IP 指纹密钥；`PRONUNCIATION_SECURITY_TIMEOUT_MS` 和 `PRONUNCIATION_UPSTREAM_TIMEOUT_MS` 可调整服务端超时。每类操作的用户/IP频率、并发、30 秒租约以及 synthesis 的账户级 `dashscope-tts` 滚动限制（3 次/秒、180 次/分钟）均硬编码在 SQL，调用方不能覆盖。上游 deadline 按 RPC 返回的实际剩余租约计算并预留安全余量。
 5. 配好 env 后 `db.ts` 自动切换为云端同步。
 
 ## 部署
