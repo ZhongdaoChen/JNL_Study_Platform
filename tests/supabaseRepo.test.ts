@@ -104,6 +104,41 @@ test('getWords maps pronunciation examples and falls back for older rows', async
   assert.deepEqual(result[1].pronunciationExamples, []);
 });
 
+test('updatePronunciationExamples sends a field-only update for the selected word', async () => {
+  const calls: {
+    table?: string;
+    values?: Record<string, unknown>;
+    column?: string;
+    value?: unknown;
+  }[] = [];
+  const client = {
+    from(table: string) {
+      return {
+        update(values: Record<string, unknown>) {
+          const call = { table, values };
+          calls.push(call);
+          return {
+            eq(column: string, value: unknown) {
+              Object.assign(call, { column, value });
+              return Promise.resolve({ error: null });
+            },
+          };
+        },
+      };
+    },
+  };
+  const repo = new SupabaseRepo(client as unknown as SupabaseClient);
+
+  await repo.updatePronunciationExamples('word-1', ['中国', '中午', '中心']);
+
+  assert.deepEqual(calls, [{
+    table: 'words',
+    values: { pronunciation_examples: ['中国', '中午', '中心'] },
+    column: 'id',
+    value: 'word-1',
+  }]);
+});
+
 test('getSentences paginates past the 1000-row limit', async () => {
   const sentences = Array.from({ length: 1500 }, (_, i) => ({
     id: `s-${i}`,

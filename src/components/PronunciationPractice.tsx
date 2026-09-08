@@ -16,7 +16,9 @@ import {
 import type { Word } from '../lib/types';
 import {
   advancePronunciationPlayback,
-  commitPronunciationOutcome,
+  beginPronunciationOutcome,
+  cancelPendingPronunciationSuccess,
+  finalizePendingPronunciationSuccess,
   startPronunciationPlayback,
 } from './pronunciationSession';
 
@@ -31,7 +33,7 @@ export type PronunciationStatus =
 
 export interface PronunciationPracticeProps {
   word: Word;
-  onExamplesChanged(updated: Word): void;
+  onExamplesChanged(wordId: string, examples: string[]): void;
   onVoiceGrade(grade: 'mastered' | 'forgotten', advance: boolean): void;
 }
 
@@ -64,12 +66,14 @@ export default function PronunciationPractice({
   const onExamplesChangedRef = useRef(onExamplesChanged);
   const onVoiceGradeRef = useRef(onVoiceGrade);
   const gradedWordIdsRef = useRef(new Set<string>());
+  const pendingSuccessWordIdsRef = useRef(new Set<string>());
   const recordingRequestRef = useRef(0);
   const assessmentRequestRef = useRef(0);
   const exampleRequestRef = useRef(0);
   const ttsRequestRef = useRef(0);
   const playbackRequestRef = useRef(0);
   const advanceTimeoutRef = useRef<number | null>(null);
+  const pendingAdvanceWordIdRef = useRef<string | null>(null);
   const stoppingRef = useRef(false);
   const recorderStartingRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -88,6 +92,11 @@ export default function PronunciationPractice({
     if (advanceTimeoutRef.current !== null) {
       window.clearTimeout(advanceTimeoutRef.current);
       advanceTimeoutRef.current = null;
+    }
+    const pendingWordId = pendingAdvanceWordIdRef.current;
+    if (pendingWordId !== null) {
+      cancelPendingPronunciationSuccess(pendingSuccessWordIdsRef.current, pendingWordId);
+      pendingAdvanceWordIdRef.current = null;
     }
   }, []);
 
@@ -138,10 +147,9 @@ export default function PronunciationPractice({
       if (!isCurrentRequest(exampleRequestRef, requestId, targetWord.id)) return;
       const latestWord = wordRef.current;
       if (latestWord.id !== targetWord.id) return;
-      const updated = { ...latestWord, pronunciationExamples: generated };
       examplesRef.current = generated;
       setExamples(generated);
-      onExamplesChangedRef.current(updated);
+      onExamplesChangedRef.current(targetWord.id, generated);
     } catch (error: unknown) {
       if (isCurrentRequest(exampleRequestRef, requestId, targetWord.id)) {
         setExamplesError(messageFor(error, '辅助词准备失败'));
@@ -246,6 +254,7 @@ export default function PronunciationPractice({
       status === 'requesting-permission'
       || status === 'assessing'
       || advancePending
+      || pendingAdvanceWordIdRef.current === currentWordIdRef.current
     ) {
       return;
     }
@@ -327,8 +336,9 @@ export default function PronunciationPractice({
       const assessment = await assessPronunciation(target, recording.blob);
       if (!isCurrentRequest(assessmentRequestRef, assessmentRequestId, wordId)) return;
 
-      const outcome = commitPronunciationOutcome(
+      const outcome = beginPronunciationOutcome(
         gradedWordIdsRef.current,
+        pendingSuccessWordIdsRef.current,
         wordId,
         assessment.correct,
       );
@@ -339,15 +349,30 @@ export default function PronunciationPractice({
         onVoiceGradeRef.current('forgotten', false);
       } else if (outcome.grade === 'mastered' && outcome.advanceAfterMs !== null) {
         setAdvancePending(true);
+        pendingAdvanceWordIdRef.current = wordId;
         advanceTimeoutRef.current = window.setTimeout(() => {
           advanceTimeoutRef.current = null;
-          if (
+          const shouldSubmit = (
             mountedRef.current
             && currentWordIdRef.current === wordId
             && assessmentRequestRef.current === assessmentRequestId
-          ) {
+          );
+          if (shouldSubmit && finalizePendingPronunciationSuccess(
+            gradedWordIdsRef.current,
+            pendingSuccessWordIdsRef.current,
+            wordId,
+          )) {
+            pendingAdvanceWordIdRef.current = null;
             setAdvancePending(false);
             onVoiceGradeRef.current('mastered', true);
+          } else {
+            cancelPendingPronunciationSuccess(pendingSuccessWordIdsRef.current, wordId);
+            if (pendingAdvanceWordIdRef.current === wordId) {
+              pendingAdvanceWordIdRef.current = null;
+            }
+            if (mountedRef.current && currentWordIdRef.current === wordId) {
+              setAdvancePending(false);
+            }
           }
         }, outcome.advanceAfterMs);
       }

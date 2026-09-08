@@ -14,6 +14,7 @@ export interface Repo {
   // 单词
   getWords(childId: string): Promise<Word[]>;
   upsertWord(word: Word): Promise<void>;
+  updatePronunciationExamples(wordId: string, examples: string[]): Promise<void>;
   deleteWord(wordId: string): Promise<void>;
   deleteWords(wordIds: string[]): Promise<void>;
 

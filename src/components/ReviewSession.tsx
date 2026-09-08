@@ -13,6 +13,7 @@ import { today } from '../lib/date';
 import { toChineseCount } from '../lib/chineseNumerals';
 import { releaseReviewActionFocus, reviewGradeFromShortcut, shouldToggleCountdownPause } from './reviewKeyboard';
 import PronunciationPractice from './PronunciationPractice';
+import { mergePronunciationExamplesInQueue } from './pronunciationSession';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
 export default function ReviewSession({ childId, lang, spellingOnly, countdownSec, dailyLimit, onChanged }: {
@@ -390,13 +391,13 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
           {pronunciationEnabled && (
             <PronunciationPractice
               word={current}
-              onExamplesChanged={(updated) => {
-                setQueue((items) => items.map((item) => (
-                  item.id === updated.id ? updated : item
-                )));
-                void repo.upsertWord(updated).catch((error: unknown) => {
+              onExamplesChanged={(wordId, examples) => {
+                setQueue((items) => (
+                  mergePronunciationExamplesInQueue(items, wordId, examples)
+                ));
+                void repo.updatePronunciationExamples(wordId, examples).catch((error: unknown) => {
                   setSaveError(
-                    `「${updated.text}」辅助词保存失败：${errorMessage(error, '请检查网络')}`,
+                    `「${current.text}」辅助词保存失败：${errorMessage(error, '请检查网络')}`,
                   );
                 });
               }}

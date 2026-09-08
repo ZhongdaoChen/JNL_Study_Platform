@@ -1,4 +1,5 @@
 import { pronunciationPlaybackItems } from '../lib/pronunciationRules.ts';
+import type { Word } from '../lib/types.ts';
 
 export interface PronunciationPlaybackState {
   items: string[];
@@ -32,14 +33,48 @@ export function pronunciationOutcome(
     : { grade: 'forgotten', advanceAfterMs: null, message: '再试一次' };
 }
 
-export function commitPronunciationOutcome(
+export function beginPronunciationOutcome(
   gradedWordIds: Set<string>,
+  pendingSuccessWordIds: Set<string>,
   wordId: string,
   correct: boolean,
 ): ReturnType<typeof pronunciationOutcome> {
-  const alreadyGraded = !isFirstPronunciationAttempt(gradedWordIds, wordId);
-  if (!alreadyGraded) gradedWordIds.add(wordId);
+  const alreadyGraded = (
+    !isFirstPronunciationAttempt(gradedWordIds, wordId)
+    || pendingSuccessWordIds.has(wordId)
+  );
+  if (!alreadyGraded) {
+    if (correct) pendingSuccessWordIds.add(wordId);
+    else gradedWordIds.add(wordId);
+  }
   return pronunciationOutcome(alreadyGraded, correct);
+}
+
+export function finalizePendingPronunciationSuccess(
+  gradedWordIds: Set<string>,
+  pendingSuccessWordIds: Set<string>,
+  wordId: string,
+): boolean {
+  if (!pendingSuccessWordIds.delete(wordId)) return false;
+  gradedWordIds.add(wordId);
+  return true;
+}
+
+export function cancelPendingPronunciationSuccess(
+  pendingSuccessWordIds: Set<string>,
+  wordId: string,
+): boolean {
+  return pendingSuccessWordIds.delete(wordId);
+}
+
+export function mergePronunciationExamplesInQueue(
+  words: readonly Word[],
+  wordId: string,
+  examples: string[],
+): Word[] {
+  return words.map((word) => (
+    word.id === wordId ? { ...word, pronunciationExamples: examples } : word
+  ));
 }
 
 export function startPronunciationPlayback(

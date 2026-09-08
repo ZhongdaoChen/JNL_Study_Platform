@@ -170,6 +170,14 @@ export class SupabaseRepo implements Repo {
     if (error) this.fail('upsertWord', error);
   }
 
+  async updatePronunciationExamples(wordId: string, examples: string[]): Promise<void> {
+    const { error } = await this.sb
+      .from('words')
+      .update({ pronunciation_examples: examples })
+      .eq('id', wordId);
+    if (error) this.fail('updatePronunciationExamples', error);
+  }
+
   async deleteWord(wordId: string): Promise<void> {
     // review_logs 通过外键 on delete cascade 自动删除
     const { error } = await this.sb.from('words').delete().eq('id', wordId);
