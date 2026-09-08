@@ -12,6 +12,7 @@ import { GRADE_LABELS } from '../lib/types';
 import { today } from '../lib/date';
 import { toChineseCount } from '../lib/chineseNumerals';
 import { releaseReviewActionFocus, reviewGradeFromShortcut, shouldToggleCountdownPause } from './reviewKeyboard';
+import PronunciationPractice from './PronunciationPractice';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
 export default function ReviewSession({ childId, lang, spellingOnly, countdownSec, dailyLimit, onChanged }: {
@@ -311,6 +312,7 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
 
   const unit = lang === 'zh' ? '字' : '单词';
   const modeLabel = spellingOnly ? (lang === 'zh' ? '会写' : '拼写') : '复习';
+  const pronunciationEnabled = lang === 'zh' && !spellingOnly;
   // 当前词实际倒计时：三个单词及以上的词组翻倍（见 reviewCountdown.ts）
   const activeCountdownSec = current ? countdownSecForWord(countdownSec, current.text) : countdownSec;
 
@@ -384,6 +386,23 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
         <div className="word-card">
           {/* 英文读/英文拼的单词放大 50%，中文读/中文写保持原尺寸 */}
           <div className={lang === 'en' ? 'big-word big-word-en' : 'big-word'}>{current.text}</div>
+
+          {pronunciationEnabled && (
+            <PronunciationPractice
+              word={current}
+              onExamplesChanged={(updated) => {
+                setQueue((items) => items.map((item) => (
+                  item.id === updated.id ? updated : item
+                )));
+                void repo.upsertWord(updated).catch((error: unknown) => {
+                  setSaveError(
+                    `「${updated.text}」辅助词保存失败：${errorMessage(error, '请检查网络')}`,
+                  );
+                });
+              }}
+              onVoiceGrade={(voiceGrade, advance) => grade(voiceGrade, advance)}
+            />
+          )}
 
           {showExample ? (
             <div className="example-area">
