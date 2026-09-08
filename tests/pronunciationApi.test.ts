@@ -22,7 +22,8 @@ function withMockedFetch(implementation: typeof fetch) {
 }
 
 test('assessment sends target, mimeType, and base64 audio', async () => {
-  const audio = new Blob([new Uint8Array([1])], { type: 'audio/webm' });
+  const audioBytes = new Uint8Array(256).fill(1);
+  const audio = new Blob([audioBytes], { type: 'audio/webm' });
   let requestUrl = '';
   let requestInit: RequestInit | undefined;
   const restore = withMockedFetch((async (input, init) => {
@@ -32,6 +33,7 @@ test('assessment sends target, mimeType, and base64 audio', async () => {
       correct: true,
       recognizedText: '中',
       acceptedReading: null,
+      confidence: 0.98,
     });
   }) as typeof fetch);
 
@@ -41,6 +43,7 @@ test('assessment sends target, mimeType, and base64 audio', async () => {
       correct: true,
       recognizedText: '中',
       acceptedReading: null,
+      confidence: 0.98,
     });
     assert.equal(requestUrl, '/api/assess-pronunciation');
     assert.equal(requestInit?.method, 'POST');
@@ -57,7 +60,7 @@ test('assessment sends target, mimeType, and base64 audio', async () => {
       JSON.stringify({
         target: '中',
         mimeType: 'audio/webm',
-        audioBase64: 'AQ==',
+        audioBase64: Buffer.from(audioBytes).toString('base64'),
       }),
     );
   } finally {
@@ -66,7 +69,7 @@ test('assessment sends target, mimeType, and base64 audio', async () => {
 });
 
 test('malformed assessment JSON throws 语音识别结果无效', async () => {
-  const audio = new Blob([new Uint8Array([1])], { type: 'audio/webm' });
+  const audio = new Blob([new Uint8Array(256)], { type: 'audio/webm' });
   const restore = withMockedFetch((async () => jsonResponse({ correct: 'yes' })) as typeof fetch);
 
   try {
@@ -154,7 +157,7 @@ test('a hanging assessment request rejects with the assessment timeout message',
     await assert.rejects(
       () => assessPronunciation(
         '中',
-        new Blob([new Uint8Array([1])], { type: 'audio/webm' }),
+        new Blob([new Uint8Array(256)], { type: 'audio/webm' }),
         { timeoutMs: 10, accessToken: 'session-token' },
       ),
       /发音评估超时，请稍后重试/,
@@ -187,7 +190,7 @@ test('assessment returns the timeout message when json hangs until abort', { tim
     await assert.rejects(
       () => assessPronunciation(
         '中',
-        new Blob([new Uint8Array([1])], { type: 'audio/webm' }),
+        new Blob([new Uint8Array(256)], { type: 'audio/webm' }),
         { timeoutMs: 10, accessToken: 'session-token' },
       ),
       /发音评估超时，请稍后重试/,

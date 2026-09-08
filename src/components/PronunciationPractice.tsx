@@ -10,6 +10,8 @@ import {
   sanitizePronunciationExamples,
 } from '../lib/pronunciationRules';
 import {
+  assertMinimumRecordingDuration,
+  convertRecordedAudioToWav,
   createSpeechRecorderSession,
   type SpeechRecorderSession,
 } from '../lib/speechRecorder';
@@ -368,13 +370,19 @@ export default function PronunciationPractice({
     try {
       const recording = await recorder.stop();
       if (!isCurrentRequest(recordingRequestRef, recordingRequestId, wordId)) return;
+      assertMinimumRecordingDuration(recording.durationMs);
       if (recording.blob.size > 1_000_000) {
+        throw new Error('录音过大，请缩短朗读时间');
+      }
+      const assessmentAudio = await convertRecordedAudioToWav(recording.blob);
+      if (!isCurrentRequest(recordingRequestRef, recordingRequestId, wordId)) return;
+      if (assessmentAudio.size > 1_000_000) {
         throw new Error('录音过大，请缩短朗读时间');
       }
 
       const assessmentRequestId = assessmentRequestRef.current + 1;
       assessmentRequestRef.current = assessmentRequestId;
-      const assessment = await assessPronunciation(target, recording.blob);
+      const assessment = await assessPronunciation(target, assessmentAudio);
       if (!isCurrentRequest(assessmentRequestRef, assessmentRequestId, wordId)) return;
 
       const outcome = beginPronunciationOutcome(

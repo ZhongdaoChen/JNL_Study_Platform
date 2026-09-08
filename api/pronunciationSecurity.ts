@@ -53,6 +53,10 @@ export interface PronunciationSecurityContext {
     input: RequestInfo | URL,
     init: RequestInit,
   ): Promise<{ response: Response; data: unknown }>;
+  fetchText(
+    input: RequestInfo | URL,
+    init: RequestInit,
+  ): Promise<{ response: Response; data: string | null }>;
 }
 
 export class PronunciationTimeoutError extends Error {}
@@ -107,6 +111,11 @@ export async function withPronunciationSecurity(
       fetchJson: (input, init) => deadline.run(async (signal) => {
         const response = await fetch(input, { ...init, signal });
         const data = response.ok ? await readJson(response) : null;
+        return { response, data };
+      }),
+      fetchText: (input, init) => deadline.run(async (signal) => {
+        const response = await fetch(input, { ...init, signal });
+        const data = response.ok ? await readText(response) : null;
         return { response, data };
       }),
     });
@@ -340,6 +349,14 @@ async function hashClientIp(ip: string, secret: string): Promise<string> {
 async function readJson(response: Response): Promise<unknown> {
   try {
     return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function readText(response: Response): Promise<string | null> {
+  try {
+    return await response.text();
   } catch {
     return null;
   }

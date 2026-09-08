@@ -15,6 +15,7 @@ export interface PronunciationAssessment {
   correct: boolean;
   recognizedText: string;
   acceptedReading: string | null;
+  confidence: number;
 }
 
 export async function assessPronunciation(
@@ -41,11 +42,15 @@ export async function assessPronunciation(
   );
 
   if (!isRecord(data)) throw new Error('语音识别结果无效');
-  const { correct, recognizedText, acceptedReading } = data;
+  const { correct, recognizedText, acceptedReading, confidence } = data;
   if (
     typeof correct !== 'boolean'
     || typeof recognizedText !== 'string'
     || (acceptedReading !== null && typeof acceptedReading !== 'string')
+    || typeof confidence !== 'number'
+    || !Number.isFinite(confidence)
+    || confidence < 0
+    || confidence > 1
   ) {
     throw new Error('语音识别结果无效');
   }
@@ -54,6 +59,7 @@ export async function assessPronunciation(
     correct,
     recognizedText,
     acceptedReading,
+    confidence,
   };
 }
 

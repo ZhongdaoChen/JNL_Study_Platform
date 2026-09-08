@@ -5,6 +5,7 @@ import {
   selectRecordingMimeType,
   updateSilenceState,
 } from '../src/lib/speechRecorder.ts';
+import * as speechRecorder from '../src/lib/speechRecorder.ts';
 
 class FakeTrack {
   readyState: 'live' | 'ended' = 'live';
@@ -108,7 +109,9 @@ class FakeMediaStreamSource {
     this.stream = stream;
   }
 
-  connect(_target: FakeAnalyser): void {}
+  connect(target: FakeAnalyser): void {
+    void target;
+  }
 
   disconnect(): void {
     this.disconnected = true;
@@ -365,6 +368,58 @@ test('6 seconds requests stop regardless of signal', () => {
   assert.equal(state.shouldStop, true);
 });
 
+test('recording duration rejects 249ms and accepts the 250ms boundary', () => {
+  const helper = (
+    speechRecorder as typeof speechRecorder & {
+      assertMinimumRecordingDuration?: (durationMs: number) => void;
+    }
+  ).assertMinimumRecordingDuration;
+
+  assert.equal(typeof helper, 'function');
+  assert.throws(() => helper?.(249), /录音时间太短/);
+  assert.doesNotThrow(() => helper?.(250));
+});
+
+test('assessment audio is encoded as documented mono PCM WAV', async () => {
+  const encode = (
+    speechRecorder as typeof speechRecorder & {
+      encodePcm16Wav?: (audio: {
+        sampleRate: number;
+        length: number;
+        numberOfChannels: number;
+        getChannelData(channel: number): Float32Array;
+      }) => Blob;
+    }
+  ).encodePcm16Wav;
+
+  assert.equal(typeof encode, 'function');
+  const blob = encode?.({
+    sampleRate: 16_000,
+    length: 2,
+    numberOfChannels: 2,
+    getChannelData(channel) {
+      return channel === 0
+        ? new Float32Array([-1, 0.5])
+        : new Float32Array([1, 0.5]);
+    },
+  });
+  assert.ok(blob);
+  assert.equal(blob.type, 'audio/wav');
+
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const view = new DataView(bytes.buffer);
+  assert.equal(new TextDecoder().decode(bytes.slice(0, 4)), 'RIFF');
+  assert.equal(new TextDecoder().decode(bytes.slice(8, 12)), 'WAVE');
+  assert.equal(view.getUint16(22, true), 1);
+  assert.equal(view.getUint32(24, true), 16_000);
+  assert.equal(view.getUint16(34, true), 16);
+  assert.equal(view.getUint32(40, true), 4);
+  assert.deepEqual(
+    [view.getInt16(44, true), view.getInt16(46, true)],
+    [0, 16_383],
+  );
+});
+
 test('start reuses an existing live stream across recordings', async () => {
   const harness = createHarness();
 
@@ -387,12 +442,17 @@ test('manual stop resolves recorded speech and closes current analysis resources
 
   await harness.session.start(() => {});
   harness.recorders[0].emitData(new Blob(['abc']));
+  harness.frames.tick(375);
 
   const result = await harness.session.stop();
 
   assert.equal(result.mimeType, 'audio/webm;codecs=opus');
   assert.equal(result.blob.type, 'audio/webm;codecs=opus');
   assert.equal(await result.blob.text(), 'abc');
+  assert.equal(
+    (result as typeof result & { durationMs?: number }).durationMs,
+    375,
+  );
   assert.equal(harness.session.isRecording, false);
   assert.equal(harness.audioContexts[0].closeCalls, 1);
   assert.ok(harness.audioContexts[0].source?.disconnected);

@@ -13,7 +13,7 @@ import {
   withPronunciationSecurity,
 } from './pronunciationSecurity.ts';
 
-const TTS_MODEL = process.env.QWEN_TTS_MODEL ?? 'qwen3-tts-flash';
+const TTS_MODEL = 'qwen3-tts-flash';
 const TTS_VOICE = process.env.QWEN_TTS_VOICE ?? 'Cherry';
 const TRUSTED_TTS_RESULT_HOSTS = new Set([
   'dashscope-result-bj.oss-cn-beijing.aliyuncs.com',

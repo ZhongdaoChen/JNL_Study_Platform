@@ -16,6 +16,7 @@ const AUDIO_FORMAT_BY_MIME_TYPE = new Map([
   ['audio/ogg;codecs=opus', 'ogg'],
   ['audio/wav', 'wav'],
 ]);
+const MIN_AUDIO_BYTES = 256;
 const MAX_AUDIO_BYTES = 1_000_000;
 const MAX_AUDIO_BASE64_LENGTH = Math.ceil(MAX_AUDIO_BYTES / 3) * 4;
 const MAX_TEXT_CHARACTERS = 40;
@@ -90,6 +91,9 @@ export function validateAudioRequest(body: unknown): AudioRequest {
   const audio = Buffer.from(audioBase64, 'base64');
   if (audio.length === 0 || audio.toString('base64') !== audioBase64) {
     throw new RequestValidationError('音频数据无效');
+  }
+  if (audio.length < MIN_AUDIO_BYTES) {
+    throw new RequestValidationError('音频太短，请重新录音');
   }
   if (audio.length > MAX_AUDIO_BYTES) {
     throw new RequestValidationError('音频不能超过 1 MB');
