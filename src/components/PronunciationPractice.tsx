@@ -18,7 +18,7 @@ import {
   advancePronunciationPlayback,
   beginPronunciationOutcome,
   cancelPendingPronunciationSuccess,
-  fillPronunciationAudioCache,
+  createPronunciationAudioWorker,
   finalizePendingPronunciationSuccess,
   startPronunciationPlayback,
 } from './pronunciationSession';
@@ -36,11 +36,6 @@ export interface PronunciationPracticeProps {
   word: Word;
   onExamplesChanged(wordId: string, examples: string[]): void;
   onVoiceGrade(grade: 'mastered' | 'forgotten', advance: boolean): void;
-}
-
-interface TtsRequest {
-  key: string;
-  promise: Promise<Map<string, string> | null>;
 }
 
 export default function PronunciationPractice({
@@ -80,8 +75,12 @@ export default function PronunciationPractice({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const cancelAudioWaitRef = useRef<(() => void) | null>(null);
   const examplesRef = useRef(validExamples(word));
-  const ttsUrlsRef = useRef(new Map<string, string>());
-  const ttsInFlightRef = useRef<TtsRequest | null>(null);
+  const ttsWorkerRef = useRef<ReturnType<typeof createPronunciationAudioWorker> | null>(null);
+  if (ttsWorkerRef.current === null) {
+    ttsWorkerRef.current = createPronunciationAudioWorker(
+      (item, signal) => synthesizePronunciation(item, { signal }),
+    );
+  }
 
   useEffect(() => {
     wordRef.current = word;
@@ -124,7 +123,7 @@ export default function PronunciationPractice({
     assessmentRequestRef.current += 1;
     exampleRequestRef.current += 1;
     ttsRequestRef.current += 1;
-    ttsInFlightRef.current = null;
+    ttsWorkerRef.current?.invalidate();
   }, []);
 
   const isCurrentRequest = useCallback((
@@ -136,6 +135,34 @@ export default function PronunciationPractice({
       && requestRef.current === requestId
       && currentWordIdRef.current === wordId
   ), []);
+
+  const ensureSynthesisUrls = useCallback(async (
+    wordId: string,
+    items: string[],
+  ): Promise<Map<string, string> | null> => {
+    const requestId = ttsRequestRef.current + 1;
+    ttsRequestRef.current = requestId;
+    setTtsLoading(true);
+    setTtsError(null);
+
+    try {
+      const urls = await ttsWorkerRef.current?.reconcile(wordId, items) ?? null;
+      if (!isCurrentRequest(ttsRequestRef, requestId, wordId)) return null;
+      return urls;
+    } catch (error: unknown) {
+      if (
+        isCurrentRequest(ttsRequestRef, requestId, wordId)
+        && !(error instanceof Error && error.name === 'AbortError')
+      ) {
+        setTtsError(messageFor(error, '正确读音加载失败，请重试'));
+      }
+      return null;
+    } finally {
+      if (isCurrentRequest(ttsRequestRef, requestId, wordId)) {
+        setTtsLoading(false);
+      }
+    }
+  }, [isCurrentRequest]);
 
   const generateExamples = useCallback(async (targetWord: Word): Promise<void> => {
     if (!isSingleHanCharacter(targetWord.text)) return;
@@ -172,7 +199,7 @@ export default function PronunciationPractice({
       recordingRequestRef.current += 1;
       assessmentRequestRef.current += 1;
       ttsRequestRef.current += 1;
-      ttsInFlightRef.current = null;
+      ttsWorkerRef.current?.invalidate();
       clearAdvanceTimeout();
       stopPlayback();
       stoppingRef.current = true;
@@ -201,7 +228,6 @@ export default function PronunciationPractice({
     clearAdvanceTimeout();
     stopAudioPlayback();
     stoppingRef.current = true;
-    ttsUrlsRef.current = new Map();
 
     const recorder = recorderRef.current;
     if (recorder?.isRecording) void recorder.stop().catch(() => {});
@@ -237,6 +263,20 @@ export default function PronunciationPractice({
     stopAudioPlayback,
     word.id,
   ]);
+
+  useEffect(() => {
+    if (
+      uiWordId !== word.id
+      || status !== 'incorrect'
+      || currentWordIdRef.current !== word.id
+    ) {
+      return;
+    }
+    void ensureSynthesisUrls(
+      word.id,
+      pronunciationPlaybackItems(word.text, examples),
+    );
+  }, [ensureSynthesisUrls, examples, status, uiWordId, word.id, word.text]);
 
   function retryExamples() {
     void generateExamples(wordRef.current);
@@ -398,49 +438,6 @@ export default function PronunciationPractice({
     return currentWordIdRef.current === wordId ? examplesRef.current : [];
   }
 
-  async function ensureSynthesisUrls(
-    wordId: string,
-    items: string[],
-  ): Promise<Map<string, string> | null> {
-    if (items.every((item) => ttsUrlsRef.current.has(item))) {
-      return new Map(ttsUrlsRef.current);
-    }
-
-    const key = `${wordId}\u0000${items.join('\u0000')}`;
-    if (ttsInFlightRef.current?.key === key) return ttsInFlightRef.current.promise;
-
-    const requestId = ttsRequestRef.current + 1;
-    ttsRequestRef.current = requestId;
-    setTtsLoading(true);
-    setTtsError(null);
-
-    const promise = (async () => {
-      const cache = ttsUrlsRef.current;
-      try {
-        const urls = await fillPronunciationAudioCache(
-          items,
-          cache,
-          synthesizePronunciation,
-        );
-        if (!isCurrentRequest(ttsRequestRef, requestId, wordId)) return null;
-        return urls;
-      } catch (error: unknown) {
-        if (isCurrentRequest(ttsRequestRef, requestId, wordId)) {
-          setTtsError(messageFor(error, '正确读音加载失败，请重试'));
-        }
-        return null;
-      } finally {
-        if (isCurrentRequest(ttsRequestRef, requestId, wordId)) {
-          setTtsLoading(false);
-          ttsInFlightRef.current = null;
-        }
-      }
-    })();
-
-    ttsInFlightRef.current = { key, promise };
-    return promise;
-  }
-
   async function playCorrectPronunciation(): Promise<void> {
     const targetWord = wordRef.current;
     const items = pronunciationPlaybackItems(
@@ -452,7 +449,7 @@ export default function PronunciationPractice({
     setIsPlaying(true);
     setTtsError(null);
 
-    const urls = await ensureSynthesisUrls(targetWord.id, items);
+    let urls = await ensureSynthesisUrls(targetWord.id, items);
     if (
       urls === null
       || playbackRequestRef.current !== playbackRequestId
@@ -462,7 +459,26 @@ export default function PronunciationPractice({
       return;
     }
 
-    let playbackState = startPronunciationPlayback(targetWord.text, examplesForWord(targetWord.id));
+    const latestItems = pronunciationPlaybackItems(
+      targetWord.text,
+      examplesForWord(targetWord.id),
+    );
+    if (latestItems.some((item) => !urls?.has(item))) {
+      urls = await ensureSynthesisUrls(targetWord.id, latestItems);
+      if (
+        urls === null
+        || playbackRequestRef.current !== playbackRequestId
+        || currentWordIdRef.current !== targetWord.id
+      ) {
+        if (playbackRequestRef.current === playbackRequestId) setIsPlaying(false);
+        return;
+      }
+    }
+
+    let playbackState = startPronunciationPlayback(
+      targetWord.text,
+      examplesForWord(targetWord.id),
+    );
     try {
       while (playbackState.playingIndex !== null) {
         if (

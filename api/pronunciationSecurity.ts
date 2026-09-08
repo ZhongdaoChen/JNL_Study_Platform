@@ -5,6 +5,13 @@ export interface PronunciationSecurityRequest {
   socket?: { remoteAddress?: string | null };
 }
 
+export interface PronunciationGlobalRateLimit {
+  resourceKey: string;
+  modelKey: string;
+  perSecond: number;
+  perMinute: number;
+}
+
 export interface PronunciationSecurityResponse {
   status(code: number): PronunciationSecurityResponse;
   json(body: unknown): void;
@@ -20,6 +27,8 @@ interface SecurityConfig {
   principalConcurrency: number;
   ipConcurrency: number;
   leaseSeconds: number;
+  securityTimeoutMs: number;
+  upstreamTimeoutMs: number;
 }
 
 interface PronunciationLease {
@@ -31,9 +40,19 @@ interface PronunciationLease {
 interface AcquireResult {
   allowed: boolean;
   lease_id?: string;
-  reason?: 'rate_limit' | 'concurrency_limit';
+  reason?: 'rate_limit' | 'global_rate_limit' | 'concurrency_limit';
   retry_after_seconds?: number;
 }
+
+export interface PronunciationSecurityContext {
+  signal: AbortSignal;
+  fetchJson(
+    input: RequestInfo | URL,
+    init: RequestInit,
+  ): Promise<{ response: Response; data: unknown }>;
+}
+
+export class PronunciationTimeoutError extends Error {}
 
 class SecurityError extends Error {
   readonly statusCode: number;
@@ -54,12 +73,17 @@ export async function withPronunciationSecurity(
   req: PronunciationSecurityRequest,
   res: PronunciationSecurityResponse,
   endpoint: PronunciationEndpoint,
-  work: () => Promise<void>,
+  work: (context: PronunciationSecurityContext) => Promise<void>,
+  globalRateLimit?: PronunciationGlobalRateLimit,
 ): Promise<void> {
   let lease: PronunciationLease;
   try {
-    lease = await acquirePronunciationLease(req, endpoint);
+    lease = await acquirePronunciationLease(req, endpoint, globalRateLimit);
   } catch (error) {
+    if (error instanceof PronunciationTimeoutError) {
+      res.status(504).json({ error: error.message });
+      return;
+    }
     if (error instanceof SecurityError) {
       if (error.retryAfterSeconds !== undefined) {
         res.setHeader?.('Retry-After', error.retryAfterSeconds);
@@ -71,9 +95,27 @@ export async function withPronunciationSecurity(
     return;
   }
 
+  const deadline = createAbortableDeadline(
+    lease.config.upstreamTimeoutMs,
+    '语音服务上游请求超时，请稍后重试',
+  );
   try {
-    await work();
+    await work({
+      signal: deadline.signal,
+      fetchJson: (input, init) => deadline.run(async (signal) => {
+        const response = await fetch(input, { ...init, signal });
+        const data = response.ok ? await readJson(response) : null;
+        return { response, data };
+      }),
+    });
+  } catch (error) {
+    if (error instanceof PronunciationTimeoutError) {
+      res.status(504).json({ error: error.message });
+      return;
+    }
+    throw error;
   } finally {
+    deadline.dispose();
     await releasePronunciationLease(lease);
   }
 }
@@ -81,27 +123,32 @@ export async function withPronunciationSecurity(
 async function acquirePronunciationLease(
   req: PronunciationSecurityRequest,
   endpoint: PronunciationEndpoint,
+  globalRateLimit?: PronunciationGlobalRateLimit,
 ): Promise<PronunciationLease> {
   const config = readSecurityConfig();
   const accessToken = bearerToken(req);
-  const userResponse = await fetch(`${config.supabaseUrl}/auth/v1/user`, {
-    method: 'GET',
-    headers: {
-      apikey: config.supabaseAnonKey,
-      Authorization: `Bearer ${accessToken}`,
+  const { response: userResponse, data: user } = await fetchJsonWithDeadline(
+    `${config.supabaseUrl}/auth/v1/user`,
+    {
+      method: 'GET',
+      headers: {
+        apikey: config.supabaseAnonKey,
+        Authorization: `Bearer ${accessToken}`,
+      },
     },
-  });
+    config.securityTimeoutMs,
+    '语音服务访问控制超时，请稍后重试',
+  );
   if (!userResponse.ok) {
     throw new SecurityError(401, '登录已失效，请重新登录');
   }
 
-  const user = await readJson(userResponse);
   if (!isRecord(user) || typeof user.id !== 'string' || !user.id.trim()) {
     throw new SecurityError(401, '登录已失效，请重新登录');
   }
 
   const ipHash = await hashClientIp(clientIp(req), config.rateLimitSecret);
-  const acquireResponse = await fetch(
+  const { response: acquireResponse, data: acquireData } = await fetchJsonWithDeadline(
     `${config.supabaseUrl}/rest/v1/rpc/acquire_pronunciation_request`,
     {
       method: 'POST',
@@ -114,6 +161,10 @@ async function acquirePronunciationLease(
         p_scope: 'pronunciation',
         p_endpoint: endpoint,
         p_ip_hash: ipHash,
+        p_resource_key: globalRateLimit?.resourceKey ?? null,
+        p_model_key: globalRateLimit?.modelKey ?? null,
+        p_global_per_second: globalRateLimit?.perSecond ?? 0,
+        p_global_per_minute: globalRateLimit?.perMinute ?? 0,
         p_window_seconds: 60,
         p_principal_limit: config.principalRateLimit,
         p_ip_limit: config.ipRateLimit,
@@ -122,12 +173,14 @@ async function acquirePronunciationLease(
         p_lease_seconds: config.leaseSeconds,
       }),
     },
+    config.securityTimeoutMs,
+    '语音服务访问控制超时，请稍后重试',
   );
   if (!acquireResponse.ok) {
     throw new SecurityError(503, '语音服务访问控制暂时不可用');
   }
 
-  const result = normalizeAcquireResult(await readJson(acquireResponse));
+  const result = normalizeAcquireResult(acquireData);
   if (!result) {
     throw new SecurityError(503, '语音服务访问控制暂时不可用');
   }
@@ -154,7 +207,7 @@ async function acquirePronunciationLease(
 
 async function releasePronunciationLease(lease: PronunciationLease): Promise<void> {
   try {
-    await fetch(
+    await fetchWithDeadline(
       `${lease.config.supabaseUrl}/rest/v1/rpc/release_pronunciation_request`,
       {
         method: 'POST',
@@ -165,6 +218,8 @@ async function releasePronunciationLease(lease: PronunciationLease): Promise<voi
         },
         body: JSON.stringify({ p_lease_id: lease.id }),
       },
+      lease.config.securityTimeoutMs,
+      '语音服务访问控制超时，请稍后重试',
     );
   } catch {
     // The database lease has a short expiry, so a failed cleanup cannot block forever.
@@ -187,6 +242,14 @@ function readSecurityConfig(): SecurityConfig {
   if (!supabaseUrl || !supabaseAnonKey || !rateLimitSecret) {
     throw new SecurityError(503, '云端语音服务未配置身份验证');
   }
+
+  const leaseSeconds = envInteger(
+    'PRONUNCIATION_LEASE_SECONDS',
+    30,
+    5,
+    120,
+  );
+  const deadlineCeilingMs = Math.max(1, leaseSeconds * 1_000 - 1_000);
 
   return {
     supabaseUrl,
@@ -216,11 +279,14 @@ function readSecurityConfig(): SecurityConfig {
       1,
       50,
     ),
-    leaseSeconds: envInteger(
-      'PRONUNCIATION_LEASE_SECONDS',
-      30,
-      5,
-      120,
+    leaseSeconds,
+    securityTimeoutMs: Math.min(
+      envInteger('PRONUNCIATION_SECURITY_TIMEOUT_MS', 5_000, 1, 120_000),
+      deadlineCeilingMs,
+    ),
+    upstreamTimeoutMs: Math.min(
+      envInteger('PRONUNCIATION_UPSTREAM_TIMEOUT_MS', 20_000, 1, 120_000),
+      deadlineCeilingMs,
     ),
   };
 }
@@ -286,6 +352,70 @@ async function readJson(response: Response): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+async function fetchJsonWithDeadline(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<{ response: Response; data: unknown }> {
+  const deadline = createAbortableDeadline(timeoutMs, timeoutMessage);
+  try {
+    return await deadline.run(async (signal) => {
+      const response = await fetch(input, { ...init, signal });
+      const data = response.ok ? await readJson(response) : null;
+      return { response, data };
+    });
+  } finally {
+    deadline.dispose();
+  }
+}
+
+async function fetchWithDeadline(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<Response> {
+  const deadline = createAbortableDeadline(timeoutMs, timeoutMessage);
+  try {
+    return await deadline.run((signal) => fetch(input, { ...init, signal }));
+  } finally {
+    deadline.dispose();
+  }
+}
+
+function createAbortableDeadline(timeoutMs: number, message: string): {
+  signal: AbortSignal;
+  run<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T>;
+  dispose(): void;
+} {
+  const controller = new AbortController();
+  let timeoutError: PronunciationTimeoutError | null = null;
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      timeoutError = new PronunciationTimeoutError(message);
+      controller.abort(timeoutError);
+      reject(timeoutError);
+    }, timeoutMs);
+  });
+
+  return {
+    signal: controller.signal,
+    async run<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+      try {
+        return await Promise.race([operation(controller.signal), timeout]);
+      } catch (error) {
+        if (timeoutError) throw timeoutError;
+        throw error;
+      }
+    },
+    dispose() {
+      clearTimeout(timeoutId);
+    },
+  };
 }
 
 function normalizeAcquireResult(value: unknown): AcquireResult | null {

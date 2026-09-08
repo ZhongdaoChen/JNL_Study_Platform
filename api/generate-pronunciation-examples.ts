@@ -10,7 +10,11 @@ import {
   parseRequestBody,
   validateExampleRequest,
 } from './pronunciationShared.ts';
-import { withPronunciationSecurity } from './pronunciationSecurity.ts';
+import {
+  type PronunciationSecurityContext,
+  PronunciationTimeoutError,
+  withPronunciationSecurity,
+} from './pronunciationSecurity.ts';
 
 const EXAMPLES_MODEL = 'qwen-turbo';
 
@@ -31,14 +35,15 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return;
   }
 
-  await withPronunciationSecurity(req, res, 'examples', () => (
-    handleAuthorizedExampleGeneration(req, res)
+  await withPronunciationSecurity(req, res, 'examples', (context) => (
+    handleAuthorizedExampleGeneration(req, res, context)
   ));
 }
 
 async function handleAuthorizedExampleGeneration(
   req: ApiRequest,
   res: ApiResponse,
+  context: PronunciationSecurityContext,
 ): Promise<void> {
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) {
@@ -59,7 +64,9 @@ async function handleAuthorizedExampleGeneration(
   }
 
   try {
-    const upstream = await fetch(DASH_SCOPE_CHAT_COMPLETIONS_URL, {
+    const { response: upstream, data: upstreamData } = await context.fetchJson(
+      DASH_SCOPE_CHAT_COMPLETIONS_URL,
+      {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -79,14 +86,15 @@ async function handleAuthorizedExampleGeneration(
           },
         ],
       }),
-    });
+      },
+    );
 
     if (!upstream.ok) {
       res.status(502).json({ error: '辅助词生成服务暂时不可用' });
       return;
     }
 
-    const text = extractChatMessageText(await upstream.json());
+    const text = extractChatMessageText(upstreamData);
     const parsed = text ? parseJsonObject(text) : null;
     const examples = sanitizePronunciationExamples(character, parsed?.examples);
     if (examples.length !== 3) {
@@ -95,7 +103,11 @@ async function handleAuthorizedExampleGeneration(
     }
 
     res.status(200).json({ examples });
-  } catch {
+  } catch (error) {
+    if (error instanceof PronunciationTimeoutError) {
+      res.status(504).json({ error: '辅助词生成超时，请稍后重试' });
+      return;
+    }
     res.status(502).json({ error: '辅助词生成服务暂时不可用' });
   }
 }

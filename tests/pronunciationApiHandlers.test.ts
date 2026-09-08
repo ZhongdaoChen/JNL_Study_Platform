@@ -32,6 +32,11 @@ interface HandlerResult {
   body: unknown;
 }
 
+interface ServerEnvironmentState {
+  releaseCalls: number;
+  acquireBodies: Record<string, unknown>[];
+}
+
 async function invokeHandler(handler: Handler, req: HandlerRequest): Promise<HandlerResult> {
   const result: HandlerResult = { status: 200, body: undefined };
   const res: HandlerResponse = {
@@ -64,21 +69,43 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function hangsUntilAborted(
+  init: RequestInit | undefined,
+  onAbort: () => void,
+): Promise<Response> {
+  return new Promise((_, reject) => {
+    const failsafe = setTimeout(
+      () => reject(new Error('test provider fetch was not aborted')),
+      200,
+    );
+    init?.signal?.addEventListener('abort', () => {
+      clearTimeout(failsafe);
+      onAbort();
+      reject(new DOMException('The operation was aborted.', 'AbortError'));
+    }, { once: true });
+  });
+}
+
 async function withServerEnvironment(
   fetchImplementation: typeof fetch,
-  run: () => Promise<void>,
+  run: (state: ServerEnvironmentState) => Promise<void>,
 ) {
   const originalFetch = globalThis.fetch;
   const originalApiKey = process.env.QWEN_API_KEY;
   const originalSupabaseUrl = process.env.SUPABASE_URL;
   const originalSupabaseAnonKey = process.env.SUPABASE_ANON_KEY;
   const originalRateSecret = process.env.PRONUNCIATION_RATE_LIMIT_SECRET;
+  const originalSecurityTimeout = process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS;
+  const originalUpstreamTimeout = process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS;
+  const originalLeaseSeconds = process.env.PRONUNCIATION_LEASE_SECONDS;
+  const state: ServerEnvironmentState = { releaseCalls: 0, acquireBodies: [] };
   globalThis.fetch = (async (input, init) => {
     const url = String(input);
     if (url === 'https://project.supabase.co/auth/v1/user') {
       return jsonResponse({ id: 'user-1' });
     }
     if (url === 'https://project.supabase.co/rest/v1/rpc/acquire_pronunciation_request') {
+      state.acquireBodies.push(JSON.parse(String(init?.body)));
       return jsonResponse({
         allowed: true,
         lease_id: '11111111-1111-4111-8111-111111111111',
@@ -86,6 +113,7 @@ async function withServerEnvironment(
       });
     }
     if (url === 'https://project.supabase.co/rest/v1/rpc/release_pronunciation_request') {
+      state.releaseCalls += 1;
       return jsonResponse(null);
     }
     return fetchImplementation(input, init);
@@ -94,9 +122,12 @@ async function withServerEnvironment(
   process.env.SUPABASE_URL = 'https://project.supabase.co';
   process.env.SUPABASE_ANON_KEY = 'anon-key';
   process.env.PRONUNCIATION_RATE_LIMIT_SECRET = 'rate-limit-secret';
+  process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS = '20';
+  process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS = '25';
+  process.env.PRONUNCIATION_LEASE_SECONDS = '30';
 
   try {
-    await run();
+    await run(state);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalApiKey === undefined) delete process.env.QWEN_API_KEY;
@@ -107,8 +138,121 @@ async function withServerEnvironment(
     else process.env.SUPABASE_ANON_KEY = originalSupabaseAnonKey;
     if (originalRateSecret === undefined) delete process.env.PRONUNCIATION_RATE_LIMIT_SECRET;
     else process.env.PRONUNCIATION_RATE_LIMIT_SECRET = originalRateSecret;
+    if (originalSecurityTimeout === undefined) delete process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS;
+    else process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS = originalSecurityTimeout;
+    if (originalUpstreamTimeout === undefined) delete process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS;
+    else process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS = originalUpstreamTimeout;
+    if (originalLeaseSeconds === undefined) delete process.env.PRONUNCIATION_LEASE_SECONDS;
+    else process.env.PRONUNCIATION_LEASE_SECONDS = originalLeaseSeconds;
   }
 }
+
+test('every protected DashScope fetch aborts before lease expiry and releases its lease', { timeout: 2_000 }, async () => {
+  const cases: {
+    name: string;
+    handler: Handler;
+    body: Record<string, unknown>;
+    expectedError: string;
+    fetchImplementation: typeof fetch;
+  }[] = [
+    {
+      name: 'assessment ASR',
+      handler: assessPronunciation,
+      body: { target: '中国', mimeType: 'audio/wav', audioBase64: 'AQ==' },
+      expectedError: '发音评估超时，请稍后重试',
+      fetchImplementation: (async (_input, init) => hangsUntilAborted(init, () => {})) as typeof fetch,
+    },
+    {
+      name: 'assessment judgment',
+      handler: assessPronunciation,
+      body: { target: '中', mimeType: 'audio/wav', audioBase64: 'AQ==' },
+      expectedError: '发音评估超时，请稍后重试',
+      fetchImplementation: (async (input, init) => {
+        if (String(input) === DASH_SCOPE_MULTIMODAL_URL) {
+          return jsonResponse({
+            output: {
+              sentence: { sentence_end: true, text: '中' },
+              text: '中',
+            },
+          });
+        }
+        return hangsUntilAborted(init, () => {});
+      }) as typeof fetch,
+    },
+    {
+      name: 'helper examples',
+      handler: generatePronunciationExamples,
+      body: { character: '中' },
+      expectedError: '辅助词生成超时，请稍后重试',
+      fetchImplementation: (async (_input, init) => hangsUntilAborted(init, () => {})) as typeof fetch,
+    },
+    {
+      name: 'synthesis',
+      handler: synthesizePronunciation,
+      body: { text: '中' },
+      expectedError: '语音合成超时，请稍后重试',
+      fetchImplementation: (async (_input, init) => hangsUntilAborted(init, () => {})) as typeof fetch,
+    },
+  ];
+
+  for (const testCase of cases) {
+    let aborted = false;
+    await withServerEnvironment((async (input, init) => {
+      try {
+        return await testCase.fetchImplementation(input, init);
+      } finally {
+        if (init?.signal?.aborted) aborted = true;
+      }
+    }) as typeof fetch, async (state) => {
+      const startedAt = Date.now();
+      const result = await invokeHandler(testCase.handler, {
+        method: 'POST',
+        body: testCase.body,
+      });
+
+      assert.deepEqual(
+        result,
+        { status: 504, body: { error: testCase.expectedError } },
+        testCase.name,
+      );
+      assert.equal(aborted, true, testCase.name);
+      assert.equal(state.releaseCalls, 1, testCase.name);
+      assert.ok(Date.now() - startedAt < 1_000, testCase.name);
+    });
+  }
+});
+
+test('a hanging DashScope response body maps to 504 and still releases the lease', { timeout: 1_000 }, async () => {
+  let bodyAborted = false;
+  await withServerEnvironment((async (_input, init) => ({
+    ok: true,
+    json() {
+      return new Promise((_, reject) => {
+        const failsafe = setTimeout(
+          () => reject(new Error('test response body was not aborted')),
+          200,
+        );
+        init?.signal?.addEventListener('abort', () => {
+          clearTimeout(failsafe);
+          bodyAborted = true;
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        }, { once: true });
+      });
+    },
+  } as Response)) as typeof fetch, async (state) => {
+    const result = await invokeHandler(synthesizePronunciation, {
+      method: 'POST',
+      body: { text: '中' },
+    });
+
+    assert.deepEqual(result, {
+      status: 504,
+      body: { error: '语音合成超时，请稍后重试' },
+    });
+    assert.equal(bodyAborted, true);
+    assert.equal(state.releaseCalls, 1);
+  });
+});
 
 test('parseJsonObject parses plain and fenced JSON objects', () => {
   assert.deepEqual(parseJsonObject('{"status":"correct"}'), { status: 'correct' });
@@ -456,7 +600,7 @@ test('synthesis uses default model and voice and returns an HTTPS audio URL', as
     return jsonResponse({
       output: { audio: { url: 'https://cdn.example.com/pronunciation.wav' } },
     });
-  }) as typeof fetch, async () => {
+  }) as typeof fetch, async (state) => {
     const result = await invokeHandler(synthesizePronunciation, {
       method: 'POST',
       body: { text: '中国' },
@@ -467,6 +611,11 @@ test('synthesis uses default model and voice and returns an HTTPS audio URL', as
       body: { audioUrl: 'https://cdn.example.com/pronunciation.wav' },
     });
     assert.equal(requestUrl, DASH_SCOPE_MULTIMODAL_URL);
+    assert.equal(state.acquireBodies.length, 1);
+    assert.equal(state.acquireBodies[0].p_resource_key, 'dashscope-tts');
+    assert.equal(state.acquireBodies[0].p_model_key, 'qwen3-tts-flash');
+    assert.equal(state.acquireBodies[0].p_global_per_second, 3);
+    assert.equal(state.acquireBodies[0].p_global_per_minute, 180);
     const upstreamBody = JSON.parse(String(requestInit?.body));
     assert.deepEqual(upstreamBody, {
       model: 'qwen3-tts-flash',

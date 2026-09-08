@@ -105,6 +105,128 @@ export async function fillPronunciationAudioCache(
   return new Map(cache);
 }
 
+export interface PronunciationAudioWorker {
+  reconcile(wordId: string, items: readonly string[]): Promise<Map<string, string>>;
+  invalidate(): void;
+}
+
+interface PronunciationAudioRun {
+  generation: number;
+  promise: Promise<void>;
+}
+
+export function createPronunciationAudioWorker(
+  synthesize: (item: string, signal: AbortSignal) => Promise<string>,
+): PronunciationAudioWorker {
+  let currentWordId: string | null = null;
+  let generation = 0;
+  let desiredItems: string[] = [];
+  let cache = new Map<string, string>();
+  let activeController: AbortController | null = null;
+  let activeRun: PronunciationAudioRun | null = null;
+
+  function reset(wordId: string | null): void {
+    generation += 1;
+    currentWordId = wordId;
+    desiredItems = [];
+    cache = new Map();
+    activeController?.abort();
+  }
+
+  function ensureRun(): PronunciationAudioRun {
+    if (activeRun) return activeRun;
+    const run: PronunciationAudioRun = {
+      generation,
+      promise: Promise.resolve(),
+    };
+    run.promise = drain(run.generation);
+    activeRun = run;
+    void run.promise.then(
+      () => {
+        if (activeRun === run) activeRun = null;
+      },
+      () => {
+        if (activeRun === run) activeRun = null;
+      },
+    );
+    return run;
+  }
+
+  async function drain(runGeneration: number): Promise<void> {
+    const attempted = new Set<string>();
+    let firstError: unknown;
+
+    while (runGeneration === generation && currentWordId !== null) {
+      const item = desiredItems.find(
+        (candidate) => !cache.has(candidate) && !attempted.has(candidate),
+      );
+      if (item === undefined) break;
+      attempted.add(item);
+
+      const controller = new AbortController();
+      activeController = controller;
+      try {
+        const url = await synthesize(item, controller.signal);
+        if (runGeneration !== generation || currentWordId === null) {
+          throw pronunciationAbortError();
+        }
+        cache.set(item, url);
+      } catch (error) {
+        if (
+          runGeneration !== generation
+          || currentWordId === null
+          || controller.signal.aborted
+        ) {
+          throw pronunciationAbortError(error);
+        }
+        firstError ??= error;
+      } finally {
+        if (activeController === controller) activeController = null;
+      }
+    }
+
+    if (runGeneration !== generation || currentWordId === null) {
+      throw pronunciationAbortError();
+    }
+    if (firstError !== undefined) throw firstError;
+  }
+
+  return {
+    async reconcile(wordId, items) {
+      if (currentWordId !== wordId) reset(wordId);
+      desiredItems = [...new Set(items)];
+      const requestGeneration = generation;
+
+      while (requestGeneration === generation && currentWordId === wordId) {
+        if (desiredItems.every((item) => cache.has(item))) {
+          return new Map(cache);
+        }
+
+        const run = ensureRun();
+        try {
+          await run.promise;
+        } catch (error) {
+          if (run.generation !== requestGeneration) continue;
+          if (requestGeneration !== generation || currentWordId !== wordId) {
+            throw pronunciationAbortError(error);
+          }
+          throw error;
+        }
+      }
+
+      throw pronunciationAbortError();
+    },
+    invalidate() {
+      reset(null);
+    },
+  };
+}
+
+function pronunciationAbortError(cause?: unknown): Error {
+  if (cause instanceof Error && cause.name === 'AbortError') return cause;
+  return new DOMException('The operation was aborted.', 'AbortError');
+}
+
 export function startPronunciationPlayback(
   target: string,
   examples: string[],

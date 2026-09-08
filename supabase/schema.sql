@@ -115,6 +115,11 @@ create table if not exists pronunciation_request_events (
   created_at timestamptz not null default clock_timestamp()
 );
 
+alter table pronunciation_request_events
+  add column if not exists resource_key text;
+alter table pronunciation_request_events
+  add column if not exists model_key text;
+
 create table if not exists pronunciation_request_leases (
   id uuid primary key default gen_random_uuid(),
   owner uuid not null references auth.users (id) on delete cascade,
@@ -136,6 +141,9 @@ create index if not exists idx_pronunciation_events_ip_time
   on pronunciation_request_events (ip_hash, request_scope, created_at);
 create index if not exists idx_pronunciation_events_created_at
   on pronunciation_request_events (created_at);
+create index if not exists idx_pronunciation_events_resource_model_time
+  on pronunciation_request_events (resource_key, model_key, created_at)
+  where resource_key is not null and model_key is not null;
 create index if not exists idx_pronunciation_leases_owner_expiry
   on pronunciation_request_leases (owner, request_scope, expires_at);
 create index if not exists idx_pronunciation_leases_ip_expiry
@@ -171,10 +179,18 @@ as $$
   );
 $$;
 
+drop function if exists acquire_pronunciation_request(
+  text, text, text, int, int, int, int, int, int
+);
+
 create or replace function acquire_pronunciation_request(
   p_scope text,
   p_endpoint text,
   p_ip_hash text,
+  p_resource_key text,
+  p_model_key text,
+  p_global_per_second int,
+  p_global_per_minute int,
   p_window_seconds int,
   p_principal_limit int,
   p_ip_limit int,
@@ -194,6 +210,8 @@ declare
   ip_requests int;
   principal_active int;
   ip_active int;
+  global_second_requests int;
+  global_minute_requests int;
   retry_after_seconds int;
   lease_id uuid;
 begin
@@ -212,6 +230,28 @@ begin
     raise exception 'invalid pronunciation limit parameters';
   end if;
 
+  if p_endpoint = 'synthesis' then
+    if nullif(trim(p_resource_key), '') is null
+       or char_length(p_resource_key) > 100
+       or nullif(trim(p_model_key), '') is null
+       or char_length(p_model_key) > 100
+       or coalesce(p_global_per_second, 0) not between 1 and 3
+       or coalesce(p_global_per_minute, 0) not between 1 and 180 then
+      raise exception 'invalid pronunciation global limit parameters';
+    end if;
+    perform pg_advisory_xact_lock(
+      hashtextextended(
+        'pronunciation:global:' || p_resource_key || ':' || p_model_key,
+        0
+      )
+    );
+  elsif p_resource_key is not null
+        or p_model_key is not null
+        or coalesce(p_global_per_second, 0) <> 0
+        or coalesce(p_global_per_minute, 0) <> 0 then
+    raise exception 'global limit parameters only apply to synthesis';
+  end if;
+
   perform pg_advisory_xact_lock(
     hashtextextended('pronunciation:user:' || request_owner::text, 0)
   );
@@ -223,6 +263,62 @@ begin
   where expires_at <= request_time;
   delete from pronunciation_request_events
   where created_at < request_time - interval '1 day';
+
+  if p_endpoint = 'synthesis' then
+    select count(*)::int
+    into global_second_requests
+    from pronunciation_request_events
+    where resource_key = p_resource_key
+      and model_key = p_model_key
+      and created_at > request_time - interval '1 second';
+
+    if global_second_requests >= p_global_per_second then
+      select greatest(
+        1,
+        ceil(extract(epoch from (
+          min(created_at) + interval '1 second' - request_time
+        )))::int
+      )
+      into retry_after_seconds
+      from pronunciation_request_events
+      where resource_key = p_resource_key
+        and model_key = p_model_key
+        and created_at > request_time - interval '1 second';
+
+      return jsonb_build_object(
+        'allowed', false,
+        'reason', 'global_rate_limit',
+        'retry_after_seconds', retry_after_seconds
+      );
+    end if;
+
+    select count(*)::int
+    into global_minute_requests
+    from pronunciation_request_events
+    where resource_key = p_resource_key
+      and model_key = p_model_key
+      and created_at > request_time - interval '1 minute';
+
+    if global_minute_requests >= p_global_per_minute then
+      select greatest(
+        1,
+        ceil(extract(epoch from (
+          min(created_at) + interval '1 minute' - request_time
+        )))::int
+      )
+      into retry_after_seconds
+      from pronunciation_request_events
+      where resource_key = p_resource_key
+        and model_key = p_model_key
+        and created_at > request_time - interval '1 minute';
+
+      return jsonb_build_object(
+        'allowed', false,
+        'reason', 'global_rate_limit',
+        'retry_after_seconds', retry_after_seconds
+      );
+    end if;
+  end if;
 
   select count(*)::int
   into principal_requests
@@ -316,6 +412,8 @@ begin
     ip_hash,
     request_scope,
     endpoint,
+    resource_key,
+    model_key,
     created_at
   )
   values (
@@ -323,6 +421,8 @@ begin
     p_ip_hash,
     p_scope,
     p_endpoint,
+    p_resource_key,
+    p_model_key,
     request_time
   );
 
@@ -361,11 +461,11 @@ as $$
 $$;
 
 revoke all on function acquire_pronunciation_request(
-  text, text, text, int, int, int, int, int, int
+  text, text, text, text, text, int, int, int, int, int, int, int, int
 ) from public;
 revoke all on function release_pronunciation_request(uuid) from public;
 grant execute on function acquire_pronunciation_request(
-  text, text, text, int, int, int, int, int, int
+  text, text, text, text, text, int, int, int, int, int, int, int, int
 ) to authenticated;
 grant execute on function release_pronunciation_request(uuid) to authenticated;
 

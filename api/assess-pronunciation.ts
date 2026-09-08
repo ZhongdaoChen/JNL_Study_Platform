@@ -16,7 +16,11 @@ import {
   isSingleHanCharacter,
   normalizeRecognizedChinese,
 } from '../src/lib/pronunciationRules.ts';
-import { withPronunciationSecurity } from './pronunciationSecurity.ts';
+import {
+  type PronunciationSecurityContext,
+  PronunciationTimeoutError,
+  withPronunciationSecurity,
+} from './pronunciationSecurity.ts';
 
 const ASSESS_MODEL =
   process.env.QWEN_PRONUNCIATION_MODEL ?? 'qwen-audio-3.0-asr-flash';
@@ -80,12 +84,16 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return;
   }
 
-  await withPronunciationSecurity(req, res, 'assessment', () => (
-    handleAuthorizedAssessment(req, res)
+  await withPronunciationSecurity(req, res, 'assessment', (context) => (
+    handleAuthorizedAssessment(req, res, context)
   ));
 }
 
-async function handleAuthorizedAssessment(req: ApiRequest, res: ApiResponse): Promise<void> {
+async function handleAuthorizedAssessment(
+  req: ApiRequest,
+  res: ApiResponse,
+  context: PronunciationSecurityContext,
+): Promise<void> {
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) {
     res.status(500).json({ error: '发音服务未配置' });
@@ -105,7 +113,9 @@ async function handleAuthorizedAssessment(req: ApiRequest, res: ApiResponse): Pr
   }
 
   try {
-    const asrResponse = await fetch(DASH_SCOPE_MULTIMODAL_URL, {
+    const { response: asrResponse, data: asrData } = await context.fetchJson(
+      DASH_SCOPE_MULTIMODAL_URL,
+      {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -132,14 +142,15 @@ async function handleAuthorizedAssessment(req: ApiRequest, res: ApiResponse): Pr
           language_hints: ['zh'],
         },
       }),
-    });
+      },
+    );
 
     if (!asrResponse.ok) {
       res.status(502).json({ error: '发音评估服务暂时不可用' });
       return;
     }
 
-    const transcript = parseAsrTranscript(await asrResponse.json());
+    const transcript = parseAsrTranscript(asrData);
     if (!transcript) {
       res.status(502).json({ error: '发音评估结果无效' });
       return;
@@ -159,7 +170,9 @@ async function handleAuthorizedAssessment(req: ApiRequest, res: ApiResponse): Pr
       return;
     }
 
-    const judgmentResponse = await fetch(DASH_SCOPE_CHAT_COMPLETIONS_URL, {
+    const { response: judgmentResponse, data: judgmentData } = await context.fetchJson(
+      DASH_SCOPE_CHAT_COMPLETIONS_URL,
+      {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -181,13 +194,14 @@ async function handleAuthorizedAssessment(req: ApiRequest, res: ApiResponse): Pr
         temperature: 0,
         max_tokens: 100,
       }),
-    });
+      },
+    );
     if (!judgmentResponse.ok) {
       res.status(502).json({ error: '发音评估服务暂时不可用' });
       return;
     }
 
-    const judgment = parsePronunciationJudgment(await judgmentResponse.json());
+    const judgment = parsePronunciationJudgment(judgmentData);
     if (!judgment) {
       res.status(502).json({ error: '发音评估结果无效' });
       return;
@@ -202,7 +216,11 @@ async function handleAuthorizedAssessment(req: ApiRequest, res: ApiResponse): Pr
       recognizedText: transcript.text,
       acceptedReading: judgment.acceptedReading,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof PronunciationTimeoutError) {
+      res.status(504).json({ error: '发音评估超时，请稍后重试' });
+      return;
+    }
     res.status(502).json({ error: '发音评估服务暂时不可用' });
   }
 }

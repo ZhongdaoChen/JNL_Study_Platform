@@ -105,6 +105,48 @@ test('synthesis requires a non-empty audioUrl', async () => {
   }
 });
 
+test('synthesis forwards cancellation to the active pronunciation request', { timeout: 1_000 }, async () => {
+  const controller = new AbortController();
+  let requestSignal: AbortSignal | null = null;
+  let markStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const restore = withMockedFetch(((input, init) => {
+    assert.equal(String(input), '/api/synthesize-pronunciation');
+    requestSignal = init?.signal ?? null;
+    markStarted?.();
+    return new Promise((_, reject) => {
+      const failsafe = setTimeout(
+        () => reject(new Error('test request was not canceled')),
+        200,
+      );
+      requestSignal?.addEventListener('abort', () => {
+        clearTimeout(failsafe);
+        reject(new DOMException('The operation was aborted.', 'AbortError'));
+      }, { once: true });
+    });
+  }) as typeof fetch);
+
+  try {
+    const requestPromise = synthesizePronunciation('中', {
+      accessToken: 'session-token',
+      signal: controller.signal,
+      timeoutMs: 500,
+    });
+    await started;
+    controller.abort();
+
+    await assert.rejects(
+      requestPromise,
+      (error: unknown) => error instanceof Error && error.name === 'AbortError',
+    );
+    assert.equal(requestSignal?.aborted, true);
+  } finally {
+    restore();
+  }
+});
+
 test('a hanging assessment request rejects with the assessment timeout message', { timeout: 100 }, async () => {
   const restore = withMockedFetch((() => new Promise(() => {})) as typeof fetch);
 

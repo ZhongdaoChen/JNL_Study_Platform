@@ -8,6 +8,7 @@ const TTS_TIMEOUT_MS = 15_000;
 interface RequestOptions {
   timeoutMs?: number;
   accessToken?: string;
+  signal?: AbortSignal;
 }
 
 export interface PronunciationAssessment {
@@ -21,7 +22,9 @@ export async function assessPronunciation(
   audio: Blob,
   options: RequestOptions = {},
 ): Promise<PronunciationAssessment> {
+  throwIfAborted(options.signal);
   const accessToken = await pronunciationAccessToken(options.accessToken);
+  throwIfAborted(options.signal);
   const data = await fetchJsonWithTimeout(
     '/api/assess-pronunciation',
     {
@@ -34,6 +37,7 @@ export async function assessPronunciation(
     '发音评估失败，请稍后重试',
     '语音识别结果无效',
     accessToken,
+    options.signal,
   );
 
   if (!isRecord(data)) throw new Error('语音识别结果无效');
@@ -57,7 +61,9 @@ export async function generatePronunciationExamples(
   character: string,
   options: RequestOptions = {},
 ): Promise<string[]> {
+  throwIfAborted(options.signal);
   const accessToken = await pronunciationAccessToken(options.accessToken);
+  throwIfAborted(options.signal);
   const data = await fetchJsonWithTimeout(
     '/api/generate-pronunciation-examples',
     { character },
@@ -66,6 +72,7 @@ export async function generatePronunciationExamples(
     '辅助词生成失败，请稍后重试',
     '辅助词结果无效',
     accessToken,
+    options.signal,
   );
 
   if (!isRecord(data)) throw new Error('辅助词结果无效');
@@ -78,7 +85,9 @@ export async function synthesizePronunciation(
   text: string,
   options: RequestOptions = {},
 ): Promise<string> {
+  throwIfAborted(options.signal);
   const accessToken = await pronunciationAccessToken(options.accessToken);
+  throwIfAborted(options.signal);
   const data = await fetchJsonWithTimeout(
     '/api/synthesize-pronunciation',
     { text },
@@ -87,6 +96,7 @@ export async function synthesizePronunciation(
     '语音合成失败，请稍后重试',
     '语音合成结果无效',
     accessToken,
+    options.signal,
   );
 
   if (!isRecord(data) || typeof data.audioUrl !== 'string' || !data.audioUrl.trim()) {
@@ -111,10 +121,14 @@ async function fetchJsonWithTimeout(
   failureMessage: string,
   invalidMessage: string,
   accessToken: string,
+  externalSignal?: AbortSignal,
 ): Promise<unknown> {
   const controller = new AbortController();
   let timedOut = false;
   let timeoutId = 0;
+  const handleExternalAbort = () => controller.abort(externalSignal?.reason);
+  externalSignal?.addEventListener('abort', handleExternalAbort, { once: true });
+  if (externalSignal?.aborted) handleExternalAbort();
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = globalThis.setTimeout(() => {
       timedOut = true;
@@ -154,15 +168,20 @@ async function fetchJsonWithTimeout(
 
     return data;
   } catch (error) {
-    if (timedOut || isAbortError(error)) {
+    if (timedOut) {
       throw new Error(timeoutMessage, { cause: error });
     }
+    if (externalSignal?.aborted) {
+      throw abortReason(externalSignal, error);
+    }
+    if (isAbortError(error)) throw error;
     if (error instanceof TypeError) {
       throw new Error(failureMessage, { cause: error });
     }
     throw error;
   } finally {
     globalThis.clearTimeout(timeoutId);
+    externalSignal?.removeEventListener('abort', handleExternalAbort);
   }
 }
 
@@ -188,8 +207,18 @@ function extractErrorMessage(data: unknown, fallback: string): string {
   return data.error.trim();
 }
 
-function isAbortError(error: unknown): boolean {
+function isAbortError(error: unknown): error is Error {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortReason(signal);
+}
+
+function abortReason(signal: AbortSignal, fallback?: unknown): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  if (isAbortError(fallback)) return fallback;
+  return new DOMException('The operation was aborted.', 'AbortError');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

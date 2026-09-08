@@ -4,6 +4,7 @@ import {
   advancePronunciationPlayback,
   beginPronunciationOutcome,
   cancelPendingPronunciationSuccess,
+  createPronunciationAudioWorker,
   fillPronunciationAudioCache,
   finalizePendingPronunciationSuccess,
   isFirstPronunciationAttempt,
@@ -243,60 +244,173 @@ test('playback advances through the target and three examples then stops', () =>
   assert.deepEqual(advancePronunciationPlayback(state), state);
 });
 
-test('pronunciation audio prefetch is sequential and preserves item order', async () => {
-  const cache = new Map<string, string>();
+test('canceling pronunciation synthesis aborts the active item and skips the remaining items', async () => {
   const calls: string[] = [];
+  let activeSignal: AbortSignal | null = null;
+  let markStarted: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const worker = createPronunciationAudioWorker(
+    async (item, signal) => {
+      calls.push(item);
+      activeSignal = signal;
+      markStarted?.();
+      return new Promise((_, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        }, { once: true });
+      });
+    },
+  );
+
+  const request = worker.reconcile('word-1', ['中', '中国', '中午', '中心']);
+  await started;
+  worker.invalidate();
+
+  await assert.rejects(
+    request,
+    (error: unknown) => error instanceof Error && error.name === 'AbortError',
+  );
+  assert.equal(activeSignal?.aborted, true);
+  assert.deepEqual(calls, ['中']);
+});
+
+test('changing words waits for canceled synthesis to settle before starting the next word', async () => {
   let active = 0;
   let maxActive = 0;
-
-  const result = await fillPronunciationAudioCache(
-    ['中', '中国', '中午', '中心'],
-    cache,
-    async (item) => {
+  let oldSignal: AbortSignal | null = null;
+  let rejectOld: ((error: Error) => void) | undefined;
+  let resolveNew: ((url: string) => void) | undefined;
+  let markOldStarted: (() => void) | undefined;
+  let markNewStarted: (() => void) | undefined;
+  const oldStarted = new Promise<void>((resolve) => {
+    markOldStarted = resolve;
+  });
+  const newStarted = new Promise<void>((resolve) => {
+    markNewStarted = resolve;
+  });
+  const calls: string[] = [];
+  const worker = createPronunciationAudioWorker(
+    (item, signal) => {
       calls.push(item);
       active += 1;
       maxActive = Math.max(maxActive, active);
-      await Promise.resolve();
-      active -= 1;
+      if (item === '旧') {
+        oldSignal = signal;
+        markOldStarted?.();
+        return new Promise((_, reject) => {
+          rejectOld = (error) => {
+            active -= 1;
+            reject(error);
+          };
+        });
+      }
+      markNewStarted?.();
+      return new Promise((resolve) => {
+        resolveNew = (url) => {
+          active -= 1;
+          resolve(url);
+        };
+      });
+    },
+  );
+
+  const oldRequest = worker.reconcile('word-old', ['旧']);
+  const oldResult = oldRequest.catch((error: unknown) => error);
+  await oldStarted;
+  const newRequest = worker.reconcile('word-new', ['新']);
+
+  assert.equal(oldSignal?.aborted, true);
+  assert.deepEqual(calls, ['旧']);
+  assert.equal(maxActive, 1);
+
+  rejectOld?.(new DOMException('The operation was aborted.', 'AbortError'));
+  await newStarted;
+  assert.deepEqual(calls, ['旧', '新']);
+  assert.equal(maxActive, 1);
+
+  resolveNew?.('https://audio.example/new.wav');
+  const newCache = await newRequest;
+  const oldError = await oldResult;
+  assert.equal(oldError instanceof Error && oldError.name, 'AbortError');
+  assert.equal(newCache.get('新'), 'https://audio.example/new.wav');
+});
+
+test('late helper examples join the current worker without requesting cached target audio again', async () => {
+  const calls: string[] = [];
+  let resolveTarget: ((url: string) => void) | undefined;
+  let markTargetStarted: (() => void) | undefined;
+  const targetStarted = new Promise<void>((resolve) => {
+    markTargetStarted = resolve;
+  });
+  const worker = createPronunciationAudioWorker(
+    async (item) => {
+      calls.push(item);
+      if (item === '中') {
+        markTargetStarted?.();
+        return new Promise((resolve) => {
+          resolveTarget = resolve;
+        });
+      }
       return `https://audio.example/${encodeURIComponent(item)}.wav`;
     },
   );
 
-  assert.equal(maxActive, 1);
+  const targetOnly = worker.reconcile('word-1', ['中']);
+  await targetStarted;
+  const withExamples = worker.reconcile(
+    'word-1',
+    ['中', '中国', '中午', '中心'],
+  );
+  resolveTarget?.('https://audio.example/target.wav');
+
+  await targetOnly;
+  const result = await withExamples;
+
   assert.deepEqual(calls, ['中', '中国', '中午', '中心']);
+  assert.equal(calls.filter((item) => item === '中').length, 1);
   assert.deepEqual([...result.keys()], ['中', '中国', '中午', '中心']);
 });
 
-test('pronunciation audio prefetch keeps partial successes and retries only missing items', async () => {
-  const cache = new Map<string, string>();
+test('pronunciation audio worker preserves partial successes and retries only missing items', async () => {
   const firstCalls: string[] = [];
+  let shouldFail = true;
+  const worker = createPronunciationAudioWorker(async (item) => {
+    firstCalls.push(item);
+    if (item === '中国' && shouldFail) {
+      throw new Error('temporary TTS failure');
+    }
+    return `https://audio.example/${encodeURIComponent(item)}.wav`;
+  });
 
   await assert.rejects(
-    () => fillPronunciationAudioCache(
-      ['中', '中国', '中午'],
-      cache,
-      async (item) => {
-        firstCalls.push(item);
-        if (item === '中国') throw new Error('temporary TTS failure');
-        return `https://audio.example/${encodeURIComponent(item)}.wav`;
-      },
-    ),
+    () => worker.reconcile('word-1', ['中', '中国', '中午']),
     /temporary TTS failure/,
   );
-
   assert.deepEqual(firstCalls, ['中', '中国', '中午']);
-  assert.deepEqual([...cache.keys()], ['中', '中午']);
 
-  const retryCalls: string[] = [];
+  shouldFail = false;
+  const beforeRetry = firstCalls.length;
+  const result = await worker.reconcile('word-1', ['中', '中国', '中午']);
+
+  assert.deepEqual(firstCalls.slice(beforeRetry), ['中国']);
+  assert.deepEqual([...result.keys()], ['中', '中午', '中国']);
+});
+
+test('the legacy cache filler remains sequential for existing callers', async () => {
+  const calls: string[] = [];
+  const cache = new Map([['中', 'https://audio.example/target.wav']]);
+
   const result = await fillPronunciationAudioCache(
     ['中', '中国', '中午'],
     cache,
     async (item) => {
-      retryCalls.push(item);
+      calls.push(item);
       return `https://audio.example/${encodeURIComponent(item)}.wav`;
     },
   );
 
-  assert.deepEqual(retryCalls, ['中国']);
-  assert.deepEqual([...result.keys()], ['中', '中午', '中国']);
+  assert.deepEqual(calls, ['中国', '中午']);
+  assert.deepEqual([...result.keys()], ['中', '中国', '中午']);
 });
