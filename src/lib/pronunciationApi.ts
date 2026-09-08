@@ -1,9 +1,11 @@
 import { sanitizePronunciationExamples } from './pronunciationRules.ts';
 import { supabase, usingCloud } from './supabase.ts';
 
-const ASSESS_TIMEOUT_MS = 12_000;
-const CONTENT_TIMEOUT_MS = 15_000;
-const TTS_TIMEOUT_MS = 15_000;
+export const PRONUNCIATION_REQUEST_TIMEOUTS = {
+  assessment: 30_000,
+  content: 15_000,
+  synthesis: 15_000,
+} as const;
 
 interface RequestOptions {
   timeoutMs?: number;
@@ -33,7 +35,7 @@ export async function assessPronunciation(
       mimeType: audio.type,
       audioBase64: await blobToBase64(audio),
     },
-    options.timeoutMs ?? ASSESS_TIMEOUT_MS,
+    options.timeoutMs ?? PRONUNCIATION_REQUEST_TIMEOUTS.assessment,
     '发音评估超时，请稍后重试',
     '发音评估失败，请稍后重试',
     '语音识别结果无效',
@@ -73,7 +75,7 @@ export async function generatePronunciationExamples(
   const data = await fetchJsonWithTimeout(
     '/api/generate-pronunciation-examples',
     { character },
-    options.timeoutMs ?? CONTENT_TIMEOUT_MS,
+    options.timeoutMs ?? PRONUNCIATION_REQUEST_TIMEOUTS.content,
     '辅助词生成超时，请稍后重试',
     '辅助词生成失败，请稍后重试',
     '辅助词结果无效',
@@ -97,7 +99,7 @@ export async function synthesizePronunciation(
   const data = await fetchJsonWithTimeout(
     '/api/synthesize-pronunciation',
     { text },
-    options.timeoutMs ?? TTS_TIMEOUT_MS,
+    options.timeoutMs ?? PRONUNCIATION_REQUEST_TIMEOUTS.synthesis,
     '语音合成超时，请稍后重试',
     '语音合成失败，请稍后重试',
     '语音合成结果无效',

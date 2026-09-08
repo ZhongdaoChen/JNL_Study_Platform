@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  PRONUNCIATION_REQUEST_TIMEOUTS,
   assessPronunciation,
   generatePronunciationExamples,
   synthesizePronunciation,
@@ -20,6 +21,10 @@ function withMockedFetch(implementation: typeof fetch) {
     globalThis.fetch = originalFetch;
   };
 }
+
+test('assessment timeout allows the two-stage server evaluation to finish', () => {
+  assert.equal(PRONUNCIATION_REQUEST_TIMEOUTS.assessment, 30_000);
+});
 
 test('assessment sends target, mimeType, and base64 audio', async () => {
   const audioBytes = new Uint8Array(256).fill(1);
