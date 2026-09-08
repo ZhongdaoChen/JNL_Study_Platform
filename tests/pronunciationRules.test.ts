@@ -28,6 +28,10 @@ test('sanitizes pronunciation examples', () => {
     sanitizePronunciationExamples('中', ['中国', '中午', '中国', '中心', '无关']),
     ['中国', '中午', '中心'],
   );
+  assert.deepEqual(
+    sanitizePronunciationExamples('中', ['中a', '中。', '中 国', '中午']),
+    ['中午'],
+  );
 });
 
 test('builds pronunciation playback items', () => {
