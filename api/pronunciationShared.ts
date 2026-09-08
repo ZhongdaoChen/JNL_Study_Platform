@@ -8,13 +8,13 @@ export const DASH_SCOPE_CHAT_COMPLETIONS_URL =
 
 const HAN_TEXT_RE = /^[\p{Script=Han}\s，。！？、,.!?；;：“”"'（）()]+$/u;
 const HAN_CHARACTER_RE = /\p{Script=Han}/u;
-const AUDIO_MIME_TYPES = new Set([
-  'audio/webm',
-  'audio/webm;codecs=opus',
-  'audio/mp4',
-  'audio/ogg',
-  'audio/ogg;codecs=opus',
-  'audio/wav',
+const AUDIO_FORMAT_BY_MIME_TYPE = new Map([
+  ['audio/webm', 'webm'],
+  ['audio/webm;codecs=opus', 'webm'],
+  ['audio/mp4', 'mp4'],
+  ['audio/ogg', 'ogg'],
+  ['audio/ogg;codecs=opus', 'ogg'],
+  ['audio/wav', 'wav'],
 ]);
 const MAX_AUDIO_BYTES = 1_000_000;
 const MAX_AUDIO_BASE64_LENGTH = Math.ceil(MAX_AUDIO_BYTES / 3) * 4;
@@ -24,11 +24,14 @@ const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=
 export interface ApiRequest {
   method?: string;
   body?: unknown;
+  headers?: Record<string, string | string[] | undefined>;
+  socket?: { remoteAddress?: string | null };
 }
 
 export interface ApiResponse {
   status(code: number): ApiResponse;
   json(body: unknown): void;
+  setHeader?(name: string, value: string | number): void;
 }
 
 export interface AudioRequest {
@@ -74,7 +77,7 @@ export function validateAudioRequest(body: unknown): AudioRequest {
   const mimeType = typeof value.mimeType === 'string' ? value.mimeType.trim() : '';
   const audioBase64 = typeof value.audioBase64 === 'string' ? value.audioBase64 : '';
 
-  if (!AUDIO_MIME_TYPES.has(mimeType)) {
+  if (!AUDIO_FORMAT_BY_MIME_TYPE.has(mimeType)) {
     throw new RequestValidationError('不支持的音频格式');
   }
   if (!audioBase64 || !BASE64_RE.test(audioBase64)) {
@@ -93,6 +96,12 @@ export function validateAudioRequest(body: unknown): AudioRequest {
   }
 
   return { target, mimeType, audioBase64 };
+}
+
+export function audioFormatForMimeType(mimeType: string): string {
+  const format = AUDIO_FORMAT_BY_MIME_TYPE.get(mimeType);
+  if (!format) throw new RequestValidationError('不支持的音频格式');
+  return format;
 }
 
 export function validateExampleRequest(body: unknown): ExampleRequest {

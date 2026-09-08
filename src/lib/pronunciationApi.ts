@@ -1,4 +1,5 @@
 import { sanitizePronunciationExamples } from './pronunciationRules.ts';
+import { supabase, usingCloud } from './supabase.ts';
 
 const ASSESS_TIMEOUT_MS = 12_000;
 const CONTENT_TIMEOUT_MS = 15_000;
@@ -6,6 +7,7 @@ const TTS_TIMEOUT_MS = 15_000;
 
 interface RequestOptions {
   timeoutMs?: number;
+  accessToken?: string;
 }
 
 export interface PronunciationAssessment {
@@ -19,6 +21,7 @@ export async function assessPronunciation(
   audio: Blob,
   options: RequestOptions = {},
 ): Promise<PronunciationAssessment> {
+  const accessToken = await pronunciationAccessToken(options.accessToken);
   const data = await fetchJsonWithTimeout(
     '/api/assess-pronunciation',
     {
@@ -30,6 +33,7 @@ export async function assessPronunciation(
     '发音评估超时，请稍后重试',
     '发音评估失败，请稍后重试',
     '语音识别结果无效',
+    accessToken,
   );
 
   if (!isRecord(data)) throw new Error('语音识别结果无效');
@@ -53,6 +57,7 @@ export async function generatePronunciationExamples(
   character: string,
   options: RequestOptions = {},
 ): Promise<string[]> {
+  const accessToken = await pronunciationAccessToken(options.accessToken);
   const data = await fetchJsonWithTimeout(
     '/api/generate-pronunciation-examples',
     { character },
@@ -60,6 +65,7 @@ export async function generatePronunciationExamples(
     '辅助词生成超时，请稍后重试',
     '辅助词生成失败，请稍后重试',
     '辅助词结果无效',
+    accessToken,
   );
 
   if (!isRecord(data)) throw new Error('辅助词结果无效');
@@ -72,6 +78,7 @@ export async function synthesizePronunciation(
   text: string,
   options: RequestOptions = {},
 ): Promise<string> {
+  const accessToken = await pronunciationAccessToken(options.accessToken);
   const data = await fetchJsonWithTimeout(
     '/api/synthesize-pronunciation',
     { text },
@@ -79,6 +86,7 @@ export async function synthesizePronunciation(
     '语音合成超时，请稍后重试',
     '语音合成失败，请稍后重试',
     '语音合成结果无效',
+    accessToken,
   );
 
   if (!isRecord(data) || typeof data.audioUrl !== 'string' || !data.audioUrl.trim()) {
@@ -102,6 +110,7 @@ async function fetchJsonWithTimeout(
   timeoutMessage: string,
   failureMessage: string,
   invalidMessage: string,
+  accessToken: string,
 ): Promise<unknown> {
   const controller = new AbortController();
   let timedOut = false;
@@ -118,7 +127,10 @@ async function fetchJsonWithTimeout(
     const response = await Promise.race([
       fetch(input, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(body),
         signal: controller.signal,
       }),
@@ -132,8 +144,8 @@ async function fetchJsonWithTimeout(
       if (timedOut || isAbortError(error)) {
         throw new Error(timeoutMessage, { cause: error });
       }
-      if (!response.ok) throw new Error(failureMessage);
-      throw new Error(invalidMessage);
+      if (!response.ok) throw new Error(failureMessage, { cause: error });
+      throw new Error(invalidMessage, { cause: error });
     }
 
     if (!response.ok) {
@@ -152,6 +164,21 @@ async function fetchJsonWithTimeout(
   } finally {
     globalThis.clearTimeout(timeoutId);
   }
+}
+
+async function pronunciationAccessToken(explicitToken?: string): Promise<string> {
+  if (explicitToken?.trim()) return explicitToken.trim();
+
+  if (!usingCloud || !supabase) {
+    throw new Error('语音服务仅在云端登录模式可用');
+  }
+
+  const { data, error } = await supabase.auth.getSession();
+  const accessToken = data.session?.access_token?.trim();
+  if (error || !accessToken) {
+    throw new Error('登录已失效，请重新登录');
+  }
+  return accessToken;
 }
 
 function extractErrorMessage(data: unknown, fallback: string): string {

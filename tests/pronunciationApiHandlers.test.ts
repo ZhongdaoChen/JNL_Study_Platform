@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  DASH_SCOPE_CHAT_COMPLETIONS_URL,
   DASH_SCOPE_MULTIMODAL_URL,
+  audioFormatForMimeType,
   parseJsonObject,
   validateAudioRequest,
   validateExampleRequest,
@@ -14,11 +16,13 @@ import synthesizePronunciation from '../api/synthesize-pronunciation.ts';
 interface HandlerRequest {
   method?: string;
   body?: unknown;
+  headers?: Record<string, string | string[] | undefined>;
 }
 
 interface HandlerResponse {
   status(code: number): HandlerResponse;
   json(body: unknown): void;
+  setHeader(name: string, value: string | number): void;
 }
 
 type Handler = (req: HandlerRequest, res: HandlerResponse) => Promise<void>;
@@ -38,8 +42,18 @@ async function invokeHandler(handler: Handler, req: HandlerRequest): Promise<Han
     json(body) {
       result.body = body;
     },
+    setHeader() {},
   };
-  await handler(req, res);
+  const request = Object.hasOwn(req, 'headers')
+    ? req
+    : {
+        ...req,
+        headers: {
+          authorization: 'Bearer valid-session-token',
+          'x-forwarded-for': '203.0.113.10',
+        },
+      };
+  await handler(request, res);
   return result;
 }
 
@@ -56,8 +70,30 @@ async function withServerEnvironment(
 ) {
   const originalFetch = globalThis.fetch;
   const originalApiKey = process.env.QWEN_API_KEY;
-  globalThis.fetch = fetchImplementation;
+  const originalSupabaseUrl = process.env.SUPABASE_URL;
+  const originalSupabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+  const originalRateSecret = process.env.PRONUNCIATION_RATE_LIMIT_SECRET;
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    if (url === 'https://project.supabase.co/auth/v1/user') {
+      return jsonResponse({ id: 'user-1' });
+    }
+    if (url === 'https://project.supabase.co/rest/v1/rpc/acquire_pronunciation_request') {
+      return jsonResponse({
+        allowed: true,
+        lease_id: '11111111-1111-4111-8111-111111111111',
+        retry_after_seconds: 0,
+      });
+    }
+    if (url === 'https://project.supabase.co/rest/v1/rpc/release_pronunciation_request') {
+      return jsonResponse(null);
+    }
+    return fetchImplementation(input, init);
+  }) as typeof fetch;
   process.env.QWEN_API_KEY = 'server-test-key';
+  process.env.SUPABASE_URL = 'https://project.supabase.co';
+  process.env.SUPABASE_ANON_KEY = 'anon-key';
+  process.env.PRONUNCIATION_RATE_LIMIT_SECRET = 'rate-limit-secret';
 
   try {
     await run();
@@ -65,6 +101,12 @@ async function withServerEnvironment(
     globalThis.fetch = originalFetch;
     if (originalApiKey === undefined) delete process.env.QWEN_API_KEY;
     else process.env.QWEN_API_KEY = originalApiKey;
+    if (originalSupabaseUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = originalSupabaseUrl;
+    if (originalSupabaseAnonKey === undefined) delete process.env.SUPABASE_ANON_KEY;
+    else process.env.SUPABASE_ANON_KEY = originalSupabaseAnonKey;
+    if (originalRateSecret === undefined) delete process.env.PRONUNCIATION_RATE_LIMIT_SECRET;
+    else process.env.PRONUNCIATION_RATE_LIMIT_SECRET = originalRateSecret;
   }
 }
 
@@ -144,6 +186,15 @@ test('validateAudioRequest accepts all supported browser audio types', () => {
   }
 });
 
+test('browser MIME types map to the documented Qwen Audio ASR format values', () => {
+  assert.equal(audioFormatForMimeType('audio/webm'), 'webm');
+  assert.equal(audioFormatForMimeType('audio/webm;codecs=opus'), 'webm');
+  assert.equal(audioFormatForMimeType('audio/mp4'), 'mp4');
+  assert.equal(audioFormatForMimeType('audio/ogg'), 'ogg');
+  assert.equal(audioFormatForMimeType('audio/ogg;codecs=opus'), 'ogg');
+  assert.equal(audioFormatForMimeType('audio/wav'), 'wav');
+});
+
 test('example validation requires a single Han character', () => {
   assert.deepEqual(validateExampleRequest({ character: ' 中 ' }), { character: '中' });
   assert.throws(() => validateExampleRequest({ character: '中国' }), /character/);
@@ -157,24 +208,36 @@ test('synthesis validation requires 1 to 40 Chinese characters', () => {
   assert.throws(() => validateSynthesisRequest({ text: 'hello' }), /text/);
 });
 
-test('assessment sends the exact multimodal request and maps correct output', async () => {
-  let requestUrl = '';
-  let requestInit: RequestInit | undefined;
+test('assessment uses the documented Qwen Audio ASR contract and a bounded polyphonic judgment', async () => {
+  const requests: { url: string; init?: RequestInit }[] = [];
 
   await withServerEnvironment((async (input, init) => {
-    requestUrl = String(input);
-    requestInit = init;
-    return jsonResponse({
-      output: {
+    const url = String(input);
+    requests.push({ url, init });
+    if (url === DASH_SCOPE_MULTIMODAL_URL) {
+      return jsonResponse({
+        output: {
+          sentence: {
+            sentence_end: true,
+            text: '中',
+            words: [{ text: '中', punctuation: '', fixed: true }],
+          },
+          text: '中',
+        },
+        usage: { duration: 1 },
+        request_id: 'asr-request-id',
+      });
+    }
+    if (url === DASH_SCOPE_CHAT_COMPLETIONS_URL) {
+      return jsonResponse({
         choices: [{
           message: {
-            content: [{
-              text: '```json\n{"status":"correct","recognizedText":"中","acceptedReading":"zhòng"}\n```',
-            }],
+            content: '{"status":"correct","acceptedReading":"zhòng"}',
           },
         }],
-      },
-    });
+      });
+    }
+    return jsonResponse({}, 404);
   }) as typeof fetch, async () => {
     const result = await invokeHandler(assessPronunciation, {
       method: 'POST',
@@ -185,43 +248,89 @@ test('assessment sends the exact multimodal request and maps correct output', as
       status: 200,
       body: { correct: true, recognizedText: '中', acceptedReading: 'zhòng' },
     });
-    assert.equal(requestUrl, DASH_SCOPE_MULTIMODAL_URL);
-    assert.equal(requestInit?.method, 'POST');
+    assert.equal(requests.length, 2);
+
+    const asrRequest = requests[0];
+    assert.equal(asrRequest.url, DASH_SCOPE_MULTIMODAL_URL);
+    assert.equal(asrRequest.init?.method, 'POST');
     assert.equal(
-      (requestInit?.headers as Record<string, string>).Authorization,
+      (asrRequest.init?.headers as Record<string, string>).Authorization,
       'Bearer server-test-key',
     );
+    assert.equal(
+      (asrRequest.init?.headers as Record<string, string>)['X-DashScope-SSE'],
+      'disable',
+    );
+    assert.deepEqual(JSON.parse(String(asrRequest.init?.body)), {
+      model: 'qwen-audio-3.0-asr-flash',
+      input: {
+        messages: [{
+          role: 'user',
+          content: [{
+            type: 'input_audio',
+            input_audio: { data: 'data:audio/webm;base64,AQ==' },
+          }],
+        }],
+      },
+      parameters: {
+        format: 'webm',
+        language_hints: ['zh'],
+      },
+    });
 
-    const upstreamBody = JSON.parse(String(requestInit?.body));
-    assert.equal(upstreamBody.model, 'qwen-omni-turbo');
-    assert.deepEqual(upstreamBody.parameters, { result_format: 'message' });
+    const judgmentRequest = requests[1];
+    assert.equal(judgmentRequest.url, DASH_SCOPE_CHAT_COMPLETIONS_URL);
+    const judgmentBody = JSON.parse(String(judgmentRequest.init?.body));
+    assert.equal(judgmentBody.model, 'qwen3.8-flash');
+    assert.equal(judgmentBody.response_format.type, 'json_schema');
+    assert.equal(judgmentBody.response_format.json_schema.strict, true);
     assert.deepEqual(
-      upstreamBody.input.messages[0].content[0],
-      { audio: 'data:audio/webm;base64,AQ==' },
+      judgmentBody.response_format.json_schema.schema.required,
+      ['status', 'acceptedReading'],
     );
-    assert.match(
-      upstreamBody.input.messages[0].content[1].text,
-      /单个多音字.*任何常见读音/s,
+    assert.equal(
+      judgmentBody.response_format.json_schema.schema.additionalProperties,
+      false,
     );
-    assert.match(
-      upstreamBody.input.messages[0].content[1].text,
-      /多字目标.*完整.*标准化/s,
-    );
-    assert.match(upstreamBody.input.messages[0].content[1].text, /JSON/);
+    assert.match(judgmentBody.messages[1].content, /"target":"中"/);
+    assert.match(judgmentBody.messages[1].content, /"recognizedText":"中"/);
   });
 });
 
-test('assessment maps unclear output with no recognized text to 422', async () => {
+test('assessment compares multi-character transcripts without an invented ASR verdict', async () => {
+  let fetchCount = 0;
+  await withServerEnvironment((async () => {
+    fetchCount += 1;
+    return jsonResponse({
+      output: {
+        sentence: { sentence_end: true, text: '中 国。' },
+        text: '中 国。',
+      },
+      usage: { duration: 1 },
+      request_id: 'asr-request-id',
+    });
+  }) as typeof fetch, async () => {
+    const result = await invokeHandler(assessPronunciation, {
+      method: 'POST',
+      body: { target: '中国', mimeType: 'audio/wav', audioBase64: 'AQ==' },
+    });
+
+    assert.deepEqual(result, {
+      status: 200,
+      body: { correct: true, recognizedText: '中 国。', acceptedReading: null },
+    });
+    assert.equal(fetchCount, 1);
+  });
+});
+
+test('assessment maps an empty official ASR transcript to 422', async () => {
   await withServerEnvironment((async () => jsonResponse({
     output: {
-      choices: [{
-        message: {
-          content: [{
-            text: '{"status":"unclear","recognizedText":"","acceptedReading":null}',
-          }],
-        },
-      }],
+      sentence: { sentence_end: true, text: '' },
+      text: '',
     },
+    usage: { duration: 1 },
+    request_id: 'asr-request-id',
   })) as typeof fetch, async () => {
     const result = await invokeHandler(assessPronunciation, {
       method: 'POST',
@@ -235,29 +344,53 @@ test('assessment maps unclear output with no recognized text to 422', async () =
   });
 });
 
-test('assessment maps invalid and failed upstream responses to safe 502 errors', async () => {
+test('assessment maps invalid and failed ASR responses to safe 502 errors', async () => {
   for (const response of [
     jsonResponse({ secret: 'upstream-secret' }, 401),
-    jsonResponse({
-      output: {
-        choices: [{
-          message: {
-            content: [{ text: '{"status":"maybe","recognizedText":"","acceptedReading":null}' }],
-          },
-        }],
-      },
-    }),
+    jsonResponse({ output: { choices: [] } }),
   ]) {
     await withServerEnvironment((async () => response) as typeof fetch, async () => {
       const result = await invokeHandler(assessPronunciation, {
         method: 'POST',
-        body: { target: '中', mimeType: 'audio/webm', audioBase64: 'AQ==' },
+        body: { target: '中国', mimeType: 'audio/webm', audioBase64: 'AQ==' },
       });
 
       assert.equal(result.status, 502);
-      assert.doesNotMatch(JSON.stringify(result.body), /upstream-secret|server-test-key|maybe/);
+      assert.doesNotMatch(JSON.stringify(result.body), /upstream-secret|server-test-key/);
     });
   }
+});
+
+test('assessment rejects a polyphonic judgment with an invalid reading value', async () => {
+  await withServerEnvironment((async (input) => {
+    if (String(input) === DASH_SCOPE_MULTIMODAL_URL) {
+      return jsonResponse({
+        output: {
+          sentence: { sentence_end: true, text: '中' },
+          text: '中',
+        },
+        usage: { duration: 1 },
+        request_id: 'asr-request-id',
+      });
+    }
+    return jsonResponse({
+      choices: [{
+        message: {
+          content: '{"status":"correct","acceptedReading":"<script>"}',
+        },
+      }],
+    });
+  }) as typeof fetch, async () => {
+    const result = await invokeHandler(assessPronunciation, {
+      method: 'POST',
+      body: { target: '中', mimeType: 'audio/webm', audioBase64: 'AQ==' },
+    });
+
+    assert.deepEqual(result, {
+      status: 502,
+      body: { error: '发音评估结果无效' },
+    });
+  });
 });
 
 test('helper-word generation uses qwen-turbo and returns three sanitized examples', async () => {
@@ -375,6 +508,29 @@ test('handlers reject non-POST requests before calling upstream', async () => {
         status: 405,
         body: { error: '仅支持 POST' },
       });
+    }
+  });
+  assert.equal(fetchCalled, false);
+});
+
+test('all paid pronunciation handlers reject missing authentication before upstream calls', async () => {
+  let fetchCalled = false;
+  await withServerEnvironment((async () => {
+    fetchCalled = true;
+    return jsonResponse({});
+  }) as typeof fetch, async () => {
+    for (const handler of [
+      assessPronunciation,
+      generatePronunciationExamples,
+      synthesizePronunciation,
+    ]) {
+      const result = await invokeHandler(handler, {
+        method: 'POST',
+        headers: {},
+        body: { target: '中', character: '中', text: '中', mimeType: 'audio/wav', audioBase64: 'AQ==' },
+      });
+      assert.equal(result.status, 401);
+      assert.deepEqual(result.body, { error: '请先登录后使用语音服务' });
     }
   });
   assert.equal(fetchCalled, false);

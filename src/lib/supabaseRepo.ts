@@ -149,7 +149,6 @@ export class SupabaseRepo implements Repo {
       sentence_ids: word.sentenceIds,
       first_learned_at: word.firstLearnedAt,
       needs_spelling: word.needsSpelling,
-      example_sentence: word.exampleSentence,
       interval: word.interval,
       ef: word.ef,
       repetitions: word.repetitions,
@@ -167,6 +166,14 @@ export class SupabaseRepo implements Repo {
       spelling_pending_retry_count: word.spellingPendingRetryCount,
     });
     if (error) this.fail('upsertWord', error);
+  }
+
+  async updateExampleSentence(wordId: string, sentence: string): Promise<void> {
+    const { error } = await this.sb
+      .from('words')
+      .update({ example_sentence: sentence })
+      .eq('id', wordId);
+    if (error) this.fail('updateExampleSentence', error);
   }
 
   async updatePronunciationExamples(wordId: string, examples: string[]): Promise<void> {

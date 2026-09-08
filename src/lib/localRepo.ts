@@ -90,14 +90,24 @@ export class LocalRepo implements Repo {
     if (idx >= 0) {
       db.words[idx] = {
         ...word,
+        exampleSentence: db.words[idx].exampleSentence ?? null,
         pronunciationExamples: db.words[idx].pronunciationExamples ?? [],
       };
     } else {
       db.words.push({
         ...word,
+        exampleSentence: word.exampleSentence ?? null,
         pronunciationExamples: word.pronunciationExamples ?? [],
       });
     }
+    save(db);
+  }
+
+  async updateExampleSentence(wordId: string, sentence: string): Promise<void> {
+    const db = load();
+    const word = db.words.find((item) => item.id === wordId);
+    if (!word) return;
+    word.exampleSentence = sentence;
     save(db);
   }
 

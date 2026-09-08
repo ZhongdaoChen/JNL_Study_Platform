@@ -36,7 +36,7 @@ test('assessment sends target, mimeType, and base64 audio', async () => {
   }) as typeof fetch);
 
   try {
-    const result = await assessPronunciation('中', audio);
+    const result = await assessPronunciation('中', audio, { accessToken: 'session-token' });
     assert.deepEqual(result, {
       correct: true,
       recognizedText: '中',
@@ -47,6 +47,10 @@ test('assessment sends target, mimeType, and base64 audio', async () => {
     assert.equal(
       (requestInit?.headers as Record<string, string>)['Content-Type'],
       'application/json',
+    );
+    assert.equal(
+      (requestInit?.headers as Record<string, string>).Authorization,
+      'Bearer session-token',
     );
     assert.equal(
       requestInit?.body,
@@ -67,7 +71,7 @@ test('malformed assessment JSON throws 语音识别结果无效', async () => {
 
   try {
     await assert.rejects(
-      () => assessPronunciation('中', audio),
+      () => assessPronunciation('中', audio, { accessToken: 'session-token' }),
       /语音识别结果无效/,
     );
   } finally {
@@ -81,7 +85,7 @@ test('example response is sanitized to three values', async () => {
   })) as typeof fetch);
 
   try {
-    const result = await generatePronunciationExamples('中');
+    const result = await generatePronunciationExamples('中', { accessToken: 'session-token' });
     assert.deepEqual(result, ['中国', '中午', '中心']);
   } finally {
     restore();
@@ -93,7 +97,7 @@ test('synthesis requires a non-empty audioUrl', async () => {
 
   try {
     await assert.rejects(
-      () => synthesizePronunciation('中国'),
+      () => synthesizePronunciation('中国', { accessToken: 'session-token' }),
       /语音合成结果无效/,
     );
   } finally {
@@ -106,7 +110,11 @@ test('a hanging assessment request rejects with the assessment timeout message',
 
   try {
     await assert.rejects(
-      () => assessPronunciation('中', new Blob([new Uint8Array([1])], { type: 'audio/webm' }), { timeoutMs: 10 }),
+      () => assessPronunciation(
+        '中',
+        new Blob([new Uint8Array([1])], { type: 'audio/webm' }),
+        { timeoutMs: 10, accessToken: 'session-token' },
+      ),
       /发音评估超时，请稍后重试/,
     );
   } finally {
@@ -135,9 +143,31 @@ test('assessment returns the timeout message when json hangs until abort', { tim
 
   try {
     await assert.rejects(
-      () => assessPronunciation('中', new Blob([new Uint8Array([1])], { type: 'audio/webm' }), { timeoutMs: 10 }),
+      () => assessPronunciation(
+        '中',
+        new Blob([new Uint8Array([1])], { type: 'audio/webm' }),
+        { timeoutMs: 10, accessToken: 'session-token' },
+      ),
       /发音评估超时，请稍后重试/,
     );
+  } finally {
+    restore();
+  }
+});
+
+test('local mode fails explicitly before calling a paid pronunciation endpoint', async () => {
+  let fetchCalled = false;
+  const restore = withMockedFetch((async () => {
+    fetchCalled = true;
+    return jsonResponse({});
+  }) as typeof fetch);
+
+  try {
+    await assert.rejects(
+      () => generatePronunciationExamples('中'),
+      /语音服务仅在云端登录模式可用/,
+    );
+    assert.equal(fetchCalled, false);
   } finally {
     restore();
   }

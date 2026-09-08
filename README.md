@@ -16,7 +16,7 @@
 ## 技术栈
 - 前端：React + TypeScript + Vite（纯静态，PWA 方向）
 - 后端：Supabase（Postgres + Auth + RLS 行级安全多用户隔离）
-- AI / 语音：Vercel Serverless 代理调用通义千问（qwen-turbo）、Qwen-Image-2.0、qwen-omni-turbo 和 qwen3-tts-flash
+- AI / 语音：Vercel Serverless 代理调用通义千问（qwen-turbo）、Qwen-Image-2.0、Qwen-Audio-3.0-ASR-Flash、Qwen3.8-Flash 和 qwen3-tts-flash
 - 存储模式：配置了 Supabase env 时走云端同步，否则自动回退到浏览器本地存储，可立即试用。
 
 ## 本地运行
@@ -39,14 +39,16 @@ npm run dev
 - `src/lib/userSettings.ts` / `dataShare.ts` — 用户配置云端同步与账户间数据共享
 - `src/lib/admin.ts` / `changelog.ts` — 管理员 RPC 与版本日志
 - `src/components/` — 各功能模块界面（AuthGate / Workspace / 录入 / 复习 / 中文发音练习 / 总览 / 统计 / 配置 / 管理员）
-- `api/generate-sentence.ts` / `api/generate-image.ts` / `api/assess-pronunciation.ts` / `api/generate-pronunciation-examples.ts` / `api/synthesize-pronunciation.ts` — Vercel Serverless：服务端代理通义千问文本、图片、发音评估、辅助词和标准读音生成（共读 `QWEN_API_KEY`，发音评估默认 `qwen-omni-turbo`，TTS 默认 `qwen3-tts-flash` + `Cherry`）
-- `supabase/schema.sql` — 数据库结构 + RLS 多用户策略 + 管理员 / 数据共享 RPC（幂等，可重复执行）
+- `api/generate-sentence.ts` / `api/generate-image.ts` / `api/assess-pronunciation.ts` / `api/generate-pronunciation-examples.ts` / `api/synthesize-pronunciation.ts` — Vercel Serverless：服务端代理通义千问文本、图片、发音评估、辅助词和标准读音生成（共读 `QWEN_API_KEY`；发音评估默认使用同步 `qwen-audio-3.0-asr-flash`，单字读音再由 `qwen3.8-flash` 严格 JSON Schema 判定，TTS 默认 `qwen3-tts-flash` + `Cherry`）
+- `api/pronunciationSecurity.ts` — 校验 Supabase Session Bearer Token，并通过 Supabase RPC 实施跨 Vercel 实例的用户/IP 频率与并发限制
+- `supabase/schema.sql` — 数据库结构 + RLS 多用户策略 + 管理员 / 数据共享 / 语音限流 RPC（幂等，可重复执行）
 
 ## 接入 Supabase（多设备同步）
 1. 在 supabase.com 新建项目。
-2. 在 SQL Editor 执行 `supabase/schema.sql`（升级后需重跑，幂等不丢数据），创建 `children / sentences / words / review_logs / feedback / user_settings` 以及管理员、数据共享 RPC。已上线旧库也请重跑一次，让 `words.pronunciation_examples` 等新增列补齐。
-3. 复制 `.env.example` 为 `.env.local`，填入 `VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`；AI 例句、配图和中文读发音接口共用服务端 `QWEN_API_KEY`（不要加 `VITE_` 前缀）。如需覆盖默认模型 / 音色，可选填 `QWEN_PRONUNCIATION_MODEL`、`QWEN_TTS_MODEL`、`QWEN_TTS_VOICE`。
-4. 配好 env 后 `db.ts` 自动切换为云端同步。
+2. 在 SQL Editor 执行 `supabase/schema.sql`（升级后需重跑，幂等不丢数据），创建 `children / sentences / words / review_logs / feedback / user_settings`、语音请求限流表，以及管理员、数据共享、语音限流 RPC。已上线旧库也请重跑一次，让 `words.pronunciation_examples` 和安全限流对象补齐。
+3. 复制 `.env.example` 为 `.env.local`，填入 `VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`；AI 例句、配图和中文读发音接口共用服务端 `QWEN_API_KEY`（不要加 `VITE_` 前缀）。发音接口要求有效的 Supabase 登录会话；浏览器本地存储模式会明确提示语音云服务不可用，而不会匿名调用付费接口。
+4. 如需覆盖默认模型 / 音色，可选填 `QWEN_PRONUNCIATION_MODEL`、`QWEN_PRONUNCIATION_JUDGE_MODEL`、`QWEN_TTS_MODEL`、`QWEN_TTS_VOICE`。可选的 `PRONUNCIATION_*` 变量用于调整每用户/IP的每分钟与并发限制；限流状态存储在 Supabase，因此多台 Vercel 实例共享。
+5. 配好 env 后 `db.ts` 自动切换为云端同步。
 
 ## 部署
 - 当前使用 Vercel（framework=vite，output=dist，SPA rewrite，见 `vercel.json`），免费免备案、立即可用。

@@ -18,6 +18,7 @@ import {
   advancePronunciationPlayback,
   beginPronunciationOutcome,
   cancelPendingPronunciationSuccess,
+  fillPronunciationAudioCache,
   finalizePendingPronunciationSuccess,
   startPronunciationPlayback,
 } from './pronunciationSession';
@@ -200,7 +201,7 @@ export default function PronunciationPractice({
     clearAdvanceTimeout();
     stopAudioPlayback();
     stoppingRef.current = true;
-    ttsUrlsRef.current.clear();
+    ttsUrlsRef.current = new Map();
 
     const recorder = recorderRef.current;
     if (recorder?.isRecording) void recorder.stop().catch(() => {});
@@ -414,13 +415,14 @@ export default function PronunciationPractice({
     setTtsError(null);
 
     const promise = (async () => {
+      const cache = ttsUrlsRef.current;
       try {
-        const pairs = await Promise.all(
-          items.map(async (item) => [item, await synthesizePronunciation(item)] as const),
+        const urls = await fillPronunciationAudioCache(
+          items,
+          cache,
+          synthesizePronunciation,
         );
         if (!isCurrentRequest(ttsRequestRef, requestId, wordId)) return null;
-        const urls = new Map(pairs);
-        ttsUrlsRef.current = urls;
         return urls;
       } catch (error: unknown) {
         if (isCurrentRequest(ttsRequestRef, requestId, wordId)) {

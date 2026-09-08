@@ -169,9 +169,45 @@ test('updatePronunciationExamples sends a field-only update for the selected wor
   }]);
 });
 
+test('updateExampleSentence sends a field-only update for the selected word', async () => {
+  const calls: {
+    table?: string;
+    values?: Record<string, unknown>;
+    column?: string;
+    value?: unknown;
+  }[] = [];
+  const client = {
+    from(table: string) {
+      return {
+        update(values: Record<string, unknown>) {
+          const call = { table, values };
+          calls.push(call);
+          return {
+            eq(column: string, value: unknown) {
+              Object.assign(call, { column, value });
+              return Promise.resolve({ error: null });
+            },
+          };
+        },
+      };
+    },
+  };
+  const repo = new SupabaseRepo(client as unknown as SupabaseClient);
+
+  await repo.updateExampleSentence('word-1', '中间有一只小猫。');
+
+  assert.deepEqual(calls, [{
+    table: 'words',
+    values: { example_sentence: '中间有一只小猫。' },
+    column: 'id',
+    value: 'word-1',
+  }]);
+});
+
 test('upsertWord preserves pronunciation examples written by an atomic update', async () => {
   const stored = makeWordRow(1, 'child-1');
   stored.id = 'word-1';
+  stored.example_sentence = '服务端最新例句';
   stored.pronunciation_examples = [];
   let upserted: Record<string, unknown> | undefined;
   const client = {
@@ -203,9 +239,48 @@ test('upsertWord preserves pronunciation examples written by an atomic update', 
     exampleSentence: '稍后生成的新例句',
   });
 
-  assert.equal(stored.example_sentence, '稍后生成的新例句');
+  assert.equal(stored.example_sentence, '服务端最新例句');
   assert.deepEqual(stored.pronunciation_examples, ['中国', '中午', '中心']);
   assert.equal(Object.hasOwn(upserted ?? {}, 'pronunciation_examples'), false);
+});
+
+test('upsertWord preserves an example sentence written by an atomic update', async () => {
+  const stored = makeWordRow(1, 'child-1');
+  stored.id = 'word-1';
+  stored.example_sentence = null;
+  let upserted: Record<string, unknown> | undefined;
+  const client = {
+    from(table: string) {
+      assert.equal(table, 'words');
+      return {
+        update(values: Record<string, unknown>) {
+          return {
+            eq(column: string, value: unknown) {
+              if (stored[column] === value) Object.assign(stored, values);
+              return Promise.resolve({ error: null });
+            },
+          };
+        },
+        upsert(values: Record<string, unknown>) {
+          upserted = values;
+          Object.assign(stored, values);
+          return Promise.resolve({ error: null });
+        },
+      };
+    },
+  };
+  const repo = new SupabaseRepo(client as unknown as SupabaseClient);
+  const stale = makeWord();
+
+  await repo.updateExampleSentence(stale.id, '中间有一只小猫。');
+  await repo.upsertWord({
+    ...stale,
+    interval: 12,
+  });
+
+  assert.equal(stored.interval, 12);
+  assert.equal(stored.example_sentence, '中间有一只小猫。');
+  assert.equal(Object.hasOwn(upserted ?? {}, 'example_sentence'), false);
 });
 
 test('getSentences paginates past the 1000-row limit', async () => {

@@ -10,6 +10,7 @@ import {
   parseRequestBody,
   validateExampleRequest,
 } from './pronunciationShared.ts';
+import { withPronunciationSecurity } from './pronunciationSecurity.ts';
 
 const EXAMPLES_MODEL = 'qwen-turbo';
 
@@ -30,6 +31,15 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return;
   }
 
+  await withPronunciationSecurity(req, res, 'examples', () => (
+    handleAuthorizedExampleGeneration(req, res)
+  ));
+}
+
+async function handleAuthorizedExampleGeneration(
+  req: ApiRequest,
+  res: ApiResponse,
+): Promise<void> {
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) {
     res.status(500).json({ error: '辅助词服务未配置' });

@@ -13,7 +13,10 @@ import { today } from '../lib/date';
 import { toChineseCount } from '../lib/chineseNumerals';
 import { releaseReviewActionFocus, reviewGradeFromShortcut, shouldToggleCountdownPause } from './reviewKeyboard';
 import PronunciationPractice from './PronunciationPractice';
-import { mergePronunciationExamplesInQueue } from './pronunciationSession';
+import {
+  mergeExampleSentenceInQueue,
+  mergePronunciationExamplesInQueue,
+} from './pronunciationSession';
 
 // 模块2 + 模块3：今日复习清单 + 逐词三档反馈 + AI 例句提示
 export default function ReviewSession({ childId, lang, spellingOnly, countdownSec, dailyLimit, onChanged }: {
@@ -206,9 +209,9 @@ export default function ReviewSession({ childId, lang, spellingOnly, countdownSe
       const sentence = await generateExampleSentence(current.text, lang);
       if (exampleRequestRef.current !== requestId) return;
       const updated: Word = { ...current, exampleSentence: sentence };
-      await repo.upsertWord(updated);
+      await repo.updateExampleSentence(current.id, sentence);
       if (exampleRequestRef.current !== requestId) return;
-      setQueue((q) => q.map((w) => (w.id === updated.id ? updated : w)));
+      setQueue((items) => mergeExampleSentenceInQueue(items, current.id, sentence));
       void generateImageFor(sentence, updated);
     } catch (e: unknown) {
       if (exampleRequestRef.current === requestId) {

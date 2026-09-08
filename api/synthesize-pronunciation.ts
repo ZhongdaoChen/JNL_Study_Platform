@@ -7,6 +7,7 @@ import {
   parseRequestBody,
   validateSynthesisRequest,
 } from './pronunciationShared.ts';
+import { withPronunciationSecurity } from './pronunciationSecurity.ts';
 
 const TTS_MODEL = process.env.QWEN_TTS_MODEL ?? 'qwen3-tts-flash';
 const TTS_VOICE = process.env.QWEN_TTS_VOICE ?? 'Cherry';
@@ -17,6 +18,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return;
   }
 
+  await withPronunciationSecurity(req, res, 'synthesis', () => (
+    handleAuthorizedSynthesis(req, res)
+  ));
+}
+
+async function handleAuthorizedSynthesis(req: ApiRequest, res: ApiResponse): Promise<void> {
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) {
     res.status(500).json({ error: '语音合成服务未配置' });

@@ -77,6 +77,34 @@ export function mergePronunciationExamplesInQueue(
   ));
 }
 
+export function mergeExampleSentenceInQueue(
+  words: readonly Word[],
+  wordId: string,
+  sentence: string,
+): Word[] {
+  return words.map((word) => (
+    word.id === wordId ? { ...word, exampleSentence: sentence } : word
+  ));
+}
+
+export async function fillPronunciationAudioCache(
+  items: readonly string[],
+  cache: Map<string, string>,
+  synthesize: (item: string) => Promise<string>,
+): Promise<Map<string, string>> {
+  let firstError: unknown;
+  for (const item of items) {
+    if (cache.has(item)) continue;
+    try {
+      cache.set(item, await synthesize(item));
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+  if (firstError !== undefined) throw firstError;
+  return new Map(cache);
+}
+
 export function startPronunciationPlayback(
   target: string,
   examples: string[],

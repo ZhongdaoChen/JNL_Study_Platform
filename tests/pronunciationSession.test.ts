@@ -4,8 +4,10 @@ import {
   advancePronunciationPlayback,
   beginPronunciationOutcome,
   cancelPendingPronunciationSuccess,
+  fillPronunciationAudioCache,
   finalizePendingPronunciationSuccess,
   isFirstPronunciationAttempt,
+  mergeExampleSentenceInQueue,
   mergePronunciationExamplesInQueue,
   pronunciationOutcome,
   startPronunciationPlayback,
@@ -166,6 +168,33 @@ test('merging generated examples changes only that field on matching queue words
   assert.equal(result[2], untouched);
 });
 
+test('merging a generated sentence changes only that field on every matching queue copy', () => {
+  const current = makeWord({ exampleSentence: null });
+  const concurrentlyGradedCopy = makeWord({
+    exampleSentence: null,
+    pronunciationExamples: ['中国', '中午', '中心'],
+    interval: 11,
+    lastGrade: 'instant',
+  });
+  const untouched = makeWord({ id: 'word-2', text: '文' });
+
+  const result = mergeExampleSentenceInQueue(
+    [current, concurrentlyGradedCopy, untouched],
+    'word-1',
+    '中间有一只小猫。',
+  );
+
+  assert.deepEqual(result[0], {
+    ...current,
+    exampleSentence: '中间有一只小猫。',
+  });
+  assert.deepEqual(result[1], {
+    ...concurrentlyGradedCopy,
+    exampleSentence: '中间有一只小猫。',
+  });
+  assert.equal(result[2], untouched);
+});
+
 test('the first correct result is mastered and advances after the success animation', () => {
   assert.deepEqual(pronunciationOutcome(false, true), {
     grade: 'mastered',
@@ -212,4 +241,62 @@ test('playback advances through the target and three examples then stops', () =>
   state = advancePronunciationPlayback(state);
   assert.equal(state.playingIndex, null);
   assert.deepEqual(advancePronunciationPlayback(state), state);
+});
+
+test('pronunciation audio prefetch is sequential and preserves item order', async () => {
+  const cache = new Map<string, string>();
+  const calls: string[] = [];
+  let active = 0;
+  let maxActive = 0;
+
+  const result = await fillPronunciationAudioCache(
+    ['中', '中国', '中午', '中心'],
+    cache,
+    async (item) => {
+      calls.push(item);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await Promise.resolve();
+      active -= 1;
+      return `https://audio.example/${encodeURIComponent(item)}.wav`;
+    },
+  );
+
+  assert.equal(maxActive, 1);
+  assert.deepEqual(calls, ['中', '中国', '中午', '中心']);
+  assert.deepEqual([...result.keys()], ['中', '中国', '中午', '中心']);
+});
+
+test('pronunciation audio prefetch keeps partial successes and retries only missing items', async () => {
+  const cache = new Map<string, string>();
+  const firstCalls: string[] = [];
+
+  await assert.rejects(
+    () => fillPronunciationAudioCache(
+      ['中', '中国', '中午'],
+      cache,
+      async (item) => {
+        firstCalls.push(item);
+        if (item === '中国') throw new Error('temporary TTS failure');
+        return `https://audio.example/${encodeURIComponent(item)}.wav`;
+      },
+    ),
+    /temporary TTS failure/,
+  );
+
+  assert.deepEqual(firstCalls, ['中', '中国', '中午']);
+  assert.deepEqual([...cache.keys()], ['中', '中午']);
+
+  const retryCalls: string[] = [];
+  const result = await fillPronunciationAudioCache(
+    ['中', '中国', '中午'],
+    cache,
+    async (item) => {
+      retryCalls.push(item);
+      return `https://audio.example/${encodeURIComponent(item)}.wav`;
+    },
+  );
+
+  assert.deepEqual(retryCalls, ['中国']);
+  assert.deepEqual([...result.keys()], ['中', '中午', '中国']);
 });

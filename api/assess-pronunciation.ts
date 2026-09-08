@@ -1,34 +1,76 @@
 import {
+  DASH_SCOPE_CHAT_COMPLETIONS_URL,
   DASH_SCOPE_MULTIMODAL_URL,
   type AudioRequest,
   type ApiRequest,
   type ApiResponse,
   RequestValidationError,
+  audioFormatForMimeType,
   extractMessageText,
   isRecord,
   parseJsonObject,
   parseRequestBody,
   validateAudioRequest,
 } from './pronunciationShared.ts';
+import {
+  isSingleHanCharacter,
+  normalizeRecognizedChinese,
+} from '../src/lib/pronunciationRules.ts';
+import { withPronunciationSecurity } from './pronunciationSecurity.ts';
 
-const ASSESS_MODEL = process.env.QWEN_PRONUNCIATION_MODEL ?? 'qwen-omni-turbo';
+const ASSESS_MODEL =
+  process.env.QWEN_PRONUNCIATION_MODEL ?? 'qwen-audio-3.0-asr-flash';
+const JUDGE_MODEL =
+  process.env.QWEN_PRONUNCIATION_JUDGE_MODEL ?? 'qwen3.8-flash';
+const PINYIN_RE = /^[a-züvāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]+[1-5]?$/iu;
 
-interface AssessmentResult {
+interface PronunciationJudgment {
   status: 'correct' | 'incorrect' | 'unclear';
-  recognizedText: string;
   acceptedReading: string | null;
 }
 
-export function assessmentPrompt(target: string): string {
+interface AsrTranscript {
+  text: string;
+  words: string[];
+}
+
+const PRONUNCIATION_JUDGMENT_RESPONSE_FORMAT = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'pronunciation_judgment',
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['correct', 'incorrect', 'unclear'],
+        },
+        acceptedReading: {
+          type: ['string', 'null'],
+        },
+      },
+      required: ['status', 'acceptedReading'],
+      additionalProperties: false,
+    },
+  },
+};
+
+export function pronunciationJudgmentPrompt(
+  target: string,
+  transcript: AsrTranscript,
+): string {
   return [
-    '你是儿童中文发音评估器。请判断录音是否正确读出了目标文本。',
-    `目标文本：${JSON.stringify(target)}`,
-    '如果目标是单个多音字，只要读出该字的任何常见读音都算正确。',
-    '如果是多字目标，必须读出完整内容；比较时忽略空格和常见中文标点，以标准化后的完整内容为准。',
-    '录音听不清、没有有效语音或无法可靠判断时，status 必须为 unclear。',
-    '只返回 JSON，不要 Markdown、解释或其他文字：',
-    '{"status":"correct|incorrect|unclear","recognizedText":"...","acceptedReading":"... or null"}',
-    'acceptedReading 仅在接受了多音字的某个常见读音时填写，否则返回 null。',
+    '你是严格的儿童普通话单字发音核验器。',
+    '输入来自语音识别服务，只能把识别文本和分词作为证据，不能添加未提供的录音信息。',
+    '若识别结果对应目标汉字的任一常见现代普通话读音，status 为 correct。',
+    '若明显对应其他读音，status 为 incorrect；证据不足则为 unclear。',
+    'correct 时 acceptedReading 必须填写带声调的拼音，其他状态必须为 null。',
+    JSON.stringify({
+      target,
+      recognizedText: transcript.text,
+      recognizedWords: transcript.words,
+    }),
   ].join('\n');
 }
 
@@ -38,6 +80,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return;
   }
 
+  await withPronunciationSecurity(req, res, 'assessment', () => (
+    handleAuthorizedAssessment(req, res)
+  ));
+}
+
+async function handleAuthorizedAssessment(req: ApiRequest, res: ApiResponse): Promise<void> {
   const apiKey = process.env.QWEN_API_KEY;
   if (!apiKey) {
     res.status(500).json({ error: '发音服务未配置' });
@@ -57,11 +105,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   }
 
   try {
-    const upstream = await fetch(DASH_SCOPE_MULTIMODAL_URL, {
+    const asrResponse = await fetch(DASH_SCOPE_MULTIMODAL_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
+        'X-DashScope-SSE': 'disable',
       },
       body: JSON.stringify({
         model: ASSESS_MODEL,
@@ -69,69 +118,143 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           messages: [{
             role: 'user',
             content: [
-              { audio: `data:${request.mimeType};base64,${request.audioBase64}` },
-              { text: assessmentPrompt(request.target) },
+              {
+                type: 'input_audio',
+                input_audio: {
+                  data: `data:${request.mimeType};base64,${request.audioBase64}`,
+                },
+              },
             ],
           }],
         },
-        parameters: { result_format: 'message' },
+        parameters: {
+          format: audioFormatForMimeType(request.mimeType),
+          language_hints: ['zh'],
+        },
       }),
     });
 
-    if (!upstream.ok) {
+    if (!asrResponse.ok) {
       res.status(502).json({ error: '发音评估服务暂时不可用' });
       return;
     }
 
-    const assessment = parseAssessment(await upstream.json());
-    if (!assessment) {
+    const transcript = parseAsrTranscript(await asrResponse.json());
+    if (!transcript) {
       res.status(502).json({ error: '发音评估结果无效' });
       return;
     }
-    if (assessment.status === 'unclear') {
+    if (!normalizeRecognizedChinese(transcript.text)) {
+      res.status(422).json({ error: '没有听清，请再试一次' });
+      return;
+    }
+
+    if (!isSingleHanCharacter(request.target)) {
+      res.status(200).json({
+        correct: normalizeRecognizedChinese(transcript.text)
+          === normalizeRecognizedChinese(request.target),
+        recognizedText: transcript.text,
+        acceptedReading: null,
+      });
+      return;
+    }
+
+    const judgmentResponse = await fetch(DASH_SCOPE_CHAT_COMPLETIONS_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: JUDGE_MODEL,
+        messages: [
+          {
+            role: 'system',
+            content: '根据给定的语音识别证据核验单个汉字读音，并严格按 JSON Schema 返回。',
+          },
+          {
+            role: 'user',
+            content: pronunciationJudgmentPrompt(request.target, transcript),
+          },
+        ],
+        response_format: PRONUNCIATION_JUDGMENT_RESPONSE_FORMAT,
+        temperature: 0,
+        max_tokens: 100,
+      }),
+    });
+    if (!judgmentResponse.ok) {
+      res.status(502).json({ error: '发音评估服务暂时不可用' });
+      return;
+    }
+
+    const judgment = parsePronunciationJudgment(await judgmentResponse.json());
+    if (!judgment) {
+      res.status(502).json({ error: '发音评估结果无效' });
+      return;
+    }
+    if (judgment.status === 'unclear') {
       res.status(422).json({ error: '没有听清，请再试一次' });
       return;
     }
 
     res.status(200).json({
-      correct: assessment.status === 'correct',
-      recognizedText: assessment.recognizedText,
-      acceptedReading: assessment.acceptedReading,
+      correct: judgment.status === 'correct',
+      recognizedText: transcript.text,
+      acceptedReading: judgment.acceptedReading,
     });
   } catch {
     res.status(502).json({ error: '发音评估服务暂时不可用' });
   }
 }
 
-function parseAssessment(value: unknown): AssessmentResult | null {
-  if (!isRecord(value) || !isRecord(value.output) || !Array.isArray(value.output.choices)) {
+function parseAsrTranscript(value: unknown): AsrTranscript | null {
+  if (!isRecord(value) || !isRecord(value.output)) {
     return null;
   }
 
-  const choice = value.output.choices[0];
+  const text = typeof value.output.text === 'string' ? value.output.text.trim() : null;
+  if (text === null) return null;
+
+  const sentence = isRecord(value.output.sentence) ? value.output.sentence : null;
+  const words = sentence && Array.isArray(sentence.words)
+    ? sentence.words.flatMap((word) => (
+        isRecord(word) && typeof word.text === 'string' && word.text.trim()
+          ? [word.text.trim()]
+          : []
+      ))
+    : [];
+
+  return { text, words };
+}
+
+function parsePronunciationJudgment(value: unknown): PronunciationJudgment | null {
+  if (!isRecord(value) || !Array.isArray(value.choices)) return null;
+  const choice = value.choices[0];
   if (!isRecord(choice) || !isRecord(choice.message)) return null;
   const text = extractMessageText(choice.message.content);
   if (!text) return null;
-
   const parsed = parseJsonObject(text);
   if (!parsed) return null;
 
-  const { status, recognizedText, acceptedReading } = parsed;
+  const { status, acceptedReading } = parsed;
   if (
     (status !== 'correct' && status !== 'incorrect' && status !== 'unclear')
-    || typeof recognizedText !== 'string'
-    || (status !== 'unclear' && !recognizedText.trim())
     || (
       acceptedReading !== null
-      && (typeof acceptedReading !== 'string' || !acceptedReading.trim())
+      && (
+        typeof acceptedReading !== 'string'
+        || !PINYIN_RE.test(acceptedReading.trim())
+        || acceptedReading.trim().length > 32
+      )
     )
+    || (status === 'correct' && typeof acceptedReading !== 'string')
+    || (status !== 'correct' && acceptedReading !== null)
   ) {
     return null;
   }
 
   return {
     status,
-    recognizedText: recognizedText.trim(),
     acceptedReading: typeof acceptedReading === 'string'
       ? acceptedReading.trim()
       : null,

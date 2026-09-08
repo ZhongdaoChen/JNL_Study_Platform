@@ -31,6 +31,10 @@ class FakeRepo implements Repo {
     if (idx >= 0) this.words[idx] = word;
     else this.words.push(word);
   }
+  async updateExampleSentence(wordId: string, sentence: string): Promise<void> {
+    const word = this.words.find((item) => item.id === wordId);
+    if (word) word.exampleSentence = sentence;
+  }
   async updatePronunciationExamples(wordId: string, examples: string[]): Promise<void> {
     const word = this.words.find((item) => item.id === wordId);
     if (word) word.pronunciationExamples = examples;
