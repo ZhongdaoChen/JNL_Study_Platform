@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { SupabaseRepo } from '../src/lib/supabaseRepo.ts';
+import type { Word } from '../src/lib/types.ts';
 
 // 假 Supabase 客户端：只实现 select 链（eq/order/range），
 // 并且和真实 PostgREST 一样「单次请求最多返回 1000 行」，
@@ -64,6 +65,35 @@ function makeWordRow(i: number, childId: string): Record<string, unknown> {
 
 function makeRepo(tables: Record<string, Record<string, unknown>[]>): SupabaseRepo {
   return new SupabaseRepo(fakeSupabase(tables) as unknown as SupabaseClient);
+}
+
+function makeWord(): Word {
+  return {
+    id: 'word-1',
+    childId: 'child-1',
+    text: '中',
+    lang: 'zh',
+    sentenceIds: ['sentence-1'],
+    firstLearnedAt: '2026-09-01',
+    needsSpelling: true,
+    exampleSentence: null,
+    pronunciationExamples: [],
+    interval: 1,
+    ef: 2.5,
+    repetitions: 0,
+    dueDate: '2026-09-09',
+    lastGrade: null,
+    lastReviewedAt: null,
+    pendingRetryCount: 0,
+    spellingInterval: 0,
+    spellingEf: 2.5,
+    spellingRepetitions: 0,
+    spellingDueDate: '2026-09-09',
+    spellingLastGrade: null,
+    spellingLastReviewedAt: null,
+    spellingPendingRetryCount: 0,
+    volatilityRate: 0,
+  };
 }
 
 test('getWords paginates past the 1000-row limit and keeps child filter', async () => {
@@ -137,6 +167,45 @@ test('updatePronunciationExamples sends a field-only update for the selected wor
     column: 'id',
     value: 'word-1',
   }]);
+});
+
+test('upsertWord preserves pronunciation examples written by an atomic update', async () => {
+  const stored = makeWordRow(1, 'child-1');
+  stored.id = 'word-1';
+  stored.pronunciation_examples = [];
+  let upserted: Record<string, unknown> | undefined;
+  const client = {
+    from(table: string) {
+      assert.equal(table, 'words');
+      return {
+        update(values: Record<string, unknown>) {
+          return {
+            eq(column: string, value: unknown) {
+              if (stored[column] === value) Object.assign(stored, values);
+              return Promise.resolve({ error: null });
+            },
+          };
+        },
+        upsert(values: Record<string, unknown>) {
+          upserted = values;
+          Object.assign(stored, values);
+          return Promise.resolve({ error: null });
+        },
+      };
+    },
+  };
+  const repo = new SupabaseRepo(client as unknown as SupabaseClient);
+  const stale = makeWord();
+
+  await repo.updatePronunciationExamples(stale.id, ['中国', '中午', '中心']);
+  await repo.upsertWord({
+    ...stale,
+    exampleSentence: '稍后生成的新例句',
+  });
+
+  assert.equal(stored.example_sentence, '稍后生成的新例句');
+  assert.deepEqual(stored.pronunciation_examples, ['中国', '中午', '中心']);
+  assert.equal(Object.hasOwn(upserted ?? {}, 'pronunciation_examples'), false);
 });
 
 test('getSentences paginates past the 1000-row limit', async () => {

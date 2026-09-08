@@ -61,3 +61,45 @@ test('updatePronunciationExamples preserves every other local word field', async
     pronunciationExamples: ['中国', '中午', '中心'],
   });
 });
+
+test('upsertWord preserves pronunciation examples written by an atomic update', async () => {
+  installLocalStorage();
+  const repo = new LocalRepo();
+  const stale = makeWord();
+  await repo.upsertWord(stale);
+  await repo.updatePronunciationExamples(stale.id, ['中国', '中午', '中心']);
+
+  await repo.upsertWord({
+    ...stale,
+    exampleSentence: '稍后生成的新例句',
+  });
+
+  const [updated] = await repo.getWords(stale.childId);
+  assert.equal(updated.exampleSentence, '稍后生成的新例句');
+  assert.deepEqual(updated.pronunciationExamples, ['中国', '中午', '中心']);
+});
+
+test('upsertWord uses supplied or empty pronunciation examples for new words', async () => {
+  installLocalStorage();
+  const repo = new LocalRepo();
+
+  await repo.upsertWord({
+    ...makeWord(),
+    id: 'word-with-examples',
+    pronunciationExamples: ['中国'],
+  });
+  await repo.upsertWord({
+    ...makeWord(),
+    id: 'legacy-word',
+    pronunciationExamples: undefined,
+  } as unknown as Word);
+
+  const words = await repo.getWords('child-1');
+  assert.deepEqual(
+    words.map((word) => [word.id, word.pronunciationExamples]),
+    [
+      ['word-with-examples', ['中国']],
+      ['legacy-word', []],
+    ],
+  );
+});

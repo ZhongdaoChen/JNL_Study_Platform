@@ -150,7 +150,6 @@ export class SupabaseRepo implements Repo {
       first_learned_at: word.firstLearnedAt,
       needs_spelling: word.needsSpelling,
       example_sentence: word.exampleSentence,
-      pronunciation_examples: word.pronunciationExamples,
       interval: word.interval,
       ef: word.ef,
       repetitions: word.repetitions,

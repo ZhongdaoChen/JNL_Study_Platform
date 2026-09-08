@@ -87,8 +87,17 @@ export class LocalRepo implements Repo {
   async upsertWord(word: Word): Promise<void> {
     const db = load();
     const idx = db.words.findIndex((w) => w.id === word.id);
-    if (idx >= 0) db.words[idx] = word;
-    else db.words.push(word);
+    if (idx >= 0) {
+      db.words[idx] = {
+        ...word,
+        pronunciationExamples: db.words[idx].pronunciationExamples ?? [],
+      };
+    } else {
+      db.words.push({
+        ...word,
+        pronunciationExamples: word.pronunciationExamples ?? [],
+      });
+    }
     save(db);
   }
 
