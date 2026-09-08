@@ -41,6 +41,19 @@ interface ServerEnvironmentState {
 const MIN_AUDIO_BYTES = 256;
 const VALID_AUDIO_BASE64 = Buffer.alloc(MIN_AUDIO_BYTES, 1).toString('base64');
 
+test('Vercel pronunciation functions keep runtime imports inside the api directory', () => {
+  const serverFiles = [
+    'api/assess-pronunciation.ts',
+    'api/generate-pronunciation-examples.ts',
+    'api/pronunciationShared.ts',
+    'api/synthesize-pronunciation.ts',
+  ];
+
+  for (const path of serverFiles) {
+    assert.doesNotMatch(readFileSync(path, 'utf8'), /from ['"]\.\.\/src\//);
+  }
+});
+
 async function invokeHandler(handler: Handler, req: HandlerRequest): Promise<HandlerResult> {
   const result: HandlerResult = { status: 200, body: undefined };
   const res: HandlerResponse = {

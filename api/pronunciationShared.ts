@@ -1,4 +1,4 @@
-import { isSingleHanCharacter } from '../src/lib/pronunciationRules.ts';
+import { isSingleHanCharacter } from './pronunciationRules.ts';
 
 export const DASH_SCOPE_MULTIMODAL_URL =
   'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation';

@@ -14,7 +14,7 @@ import {
 import {
   isSingleHanCharacter,
   normalizeRecognizedChinese,
-} from '../src/lib/pronunciationRules.ts';
+} from './pronunciationRules.ts';
 import {
   type PronunciationSecurityContext,
   PronunciationTimeoutError,

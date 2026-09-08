@@ -1,4 +1,4 @@
-import { sanitizePronunciationExamples } from '../src/lib/pronunciationRules.ts';
+import { sanitizePronunciationExamples } from './pronunciationRules.ts';
 import {
   DASH_SCOPE_CHAT_COMPLETIONS_URL,
   type ApiRequest,
