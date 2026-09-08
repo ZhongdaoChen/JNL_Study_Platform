@@ -14,6 +14,7 @@ function makeWord(overrides: Partial<Word>): Word {
     firstLearnedAt: today(),
     needsSpelling: true,
     exampleSentence: null,
+    pronunciationExamples: [],
     interval: 1,
     ef: 2.5,
     repetitions: 0,
@@ -134,4 +135,79 @@ test('all existing copies of the word are synced to the updated state', () => {
   const copies = next.filter((w) => w.id === 'w1');
   assert.equal(copies.length, 3);
   assert.ok(copies.every((w) => w.pendingRetryCount === 1));
+});
+
+test('async review completion preserves generated fields from the latest queue state', () => {
+  const queue = makeQueue(3);
+  queue[1] = {
+    ...queue[1],
+    exampleSentence: '复习保存时已经生成的新例句。',
+    pronunciationExamples: ['中国', '中午', '中心'],
+  };
+  const staleReviewResult = {
+    ...queue[1],
+    exampleSentence: null,
+    pronunciationExamples: [],
+    repetitions: 2,
+    pendingRetryCount: 0,
+  };
+
+  const next = applyReviewToQueue(queue, staleReviewResult, {
+    spellingOnly: false,
+    isRetryAttempt: false,
+    gradedIndex: 1,
+  });
+
+  assert.equal(next[1].repetitions, 2);
+  assert.equal(next[1].exampleSentence, '复习保存时已经生成的新例句。');
+  assert.deepEqual(next[1].pronunciationExamples, ['中国', '中午', '中心']);
+});
+
+test('retry copies inherit generated fields that arrived before review completion', () => {
+  const queue = makeQueue(15);
+  queue[0] = {
+    ...queue[0],
+    exampleSentence: '异步生成的最新例句。',
+    pronunciationExamples: ['中国', '中午', '中间'],
+  };
+  const staleReviewResult = {
+    ...queue[0],
+    exampleSentence: null,
+    pronunciationExamples: [],
+    pendingRetryCount: 2,
+  };
+
+  const firstRetryQueue = applyReviewToQueue(queue, staleReviewResult, {
+    spellingOnly: false,
+    isRetryAttempt: false,
+    gradedIndex: 0,
+  });
+  const firstCopies = firstRetryQueue.filter((word) => word.id === queue[0].id);
+  assert.equal(firstCopies.length, 2);
+  assert.ok(firstCopies.every(
+    (word) => word.exampleSentence === '异步生成的最新例句。',
+  ));
+  assert.ok(firstCopies.every(
+    (word) => JSON.stringify(word.pronunciationExamples)
+      === JSON.stringify(['中国', '中午', '中间']),
+  ));
+
+  const retryResult = {
+    ...staleReviewResult,
+    pendingRetryCount: 1,
+  };
+  const appendedRetryQueue = applyReviewToQueue(firstRetryQueue, retryResult, {
+    spellingOnly: false,
+    isRetryAttempt: true,
+    gradedIndex: firstRetryQueue.findIndex((word) => word.id === queue[0].id),
+  });
+  const appendedCopies = appendedRetryQueue.filter((word) => word.id === queue[0].id);
+  assert.equal(appendedCopies.length, 3);
+  assert.ok(appendedCopies.every(
+    (word) => word.exampleSentence === '异步生成的最新例句。',
+  ));
+  assert.ok(appendedCopies.every(
+    (word) => JSON.stringify(word.pronunciationExamples)
+      === JSON.stringify(['中国', '中午', '中间']),
+  ));
 });

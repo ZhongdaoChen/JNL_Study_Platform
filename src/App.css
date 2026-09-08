@@ -214,6 +214,209 @@ button {
 }
 /* 英文读 / 英文拼：单词在 44px 基础上加大 50% */
 .big-word-en { font-size: 66px; }
+
+.pronunciation-practice {
+  position: relative;
+  width: min(100%, 430px);
+  margin: 18px auto 0;
+}
+.pronunciation-controls {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.pronunciation-mic-btn,
+.pronunciation-play-btn {
+  min-height: 44px;
+  border-radius: 999px;
+  padding: 10px 16px;
+  border: 1px solid #cfd3ff;
+  background: #f5f6ff;
+  color: #4858dc;
+  font: inherit;
+  font-weight: 650;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+.pronunciation-mic-btn:hover:not(:disabled),
+.pronunciation-play-btn:hover:not(:disabled) {
+  background: #eceeff;
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(91, 108, 255, 0.18);
+}
+.pronunciation-mic-btn:focus-visible,
+.pronunciation-play-btn:focus-visible,
+.pronunciation-example-status .link-btn:focus-visible {
+  outline: 3px solid rgba(91, 108, 255, 0.32);
+  outline-offset: 2px;
+}
+.pronunciation-mic-btn:disabled,
+.pronunciation-play-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+.pronunciation-mic-btn svg,
+.pronunciation-play-btn svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pronunciation-mic-btn.listening {
+  position: relative;
+  background: #5b6cff;
+  border-color: #5b6cff;
+  color: #fff;
+  animation: pronunciation-listening-pulse 1.35s ease-out infinite;
+}
+.pronunciation-mic-btn.listening svg rect {
+  fill: currentColor;
+  stroke: none;
+}
+.pronunciation-feedback {
+  min-height: 24px;
+  margin-top: 10px;
+  color: #666b80;
+  font-size: 15px;
+  font-weight: 600;
+}
+.pronunciation-feedback.correct {
+  color: #18794e;
+  animation: pronunciation-success-pop 320ms ease-out both;
+}
+.pronunciation-feedback.incorrect { color: #99580a; }
+.pronunciation-feedback.error,
+.pronunciation-error { color: #b4232d; }
+.pronunciation-error {
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+.pronunciation-examples {
+  min-height: 34px;
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pronunciation-example {
+  padding: 5px 10px;
+  border: 1px solid #e0e3ef;
+  border-radius: 999px;
+  background: #fafaff;
+  color: #65697d;
+  font-size: 16px;
+  line-height: 1.4;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease,
+    transform 160ms ease;
+}
+.pronunciation-example mark {
+  border-radius: 4px;
+  padding: 0 2px;
+  background: #eceeff;
+  color: #4b5be0;
+  font-weight: 750;
+}
+.pronunciation-example.playing {
+  border-color: #5b6cff;
+  background: #eef0ff;
+  color: #343e9e;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(91, 108, 255, 0.2);
+}
+.big-word:has(+ .pronunciation-practice[data-playing-target='true']) {
+  color: #4b5be0;
+  text-shadow: 0 4px 18px rgba(91, 108, 255, 0.22);
+}
+.pronunciation-example-status {
+  color: #666b80;
+  font-size: 14px;
+}
+.pronunciation-example-status .link-btn {
+  min-height: 44px;
+  margin-top: 0;
+  padding: 8px 4px;
+}
+.pronunciation-fireworks {
+  position: absolute;
+  top: 45px;
+  left: 50%;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+.pronunciation-fireworks span {
+  --firework-x: 0px;
+  --firework-y: -34px;
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3px;
+  border-radius: 50%;
+  background: #18a558;
+  box-shadow: 0 0 0 2px rgba(24, 165, 88, 0.12);
+  animation: pronunciation-firework 820ms ease-out both;
+}
+.pronunciation-fireworks span:nth-child(2) {
+  --firework-x: 27px;
+  --firework-y: -25px;
+  background: #5b6cff;
+}
+.pronunciation-fireworks span:nth-child(3) {
+  --firework-x: 38px;
+  --firework-y: 2px;
+  background: #f0a500;
+}
+.pronunciation-fireworks span:nth-child(4) {
+  --firework-x: 24px;
+  --firework-y: 27px;
+  background: #18a558;
+}
+.pronunciation-fireworks span:nth-child(5) {
+  --firework-x: 0px;
+  --firework-y: 36px;
+  background: #5b6cff;
+}
+.pronunciation-fireworks span:nth-child(6) {
+  --firework-x: -25px;
+  --firework-y: 27px;
+  background: #f0a500;
+}
+.pronunciation-fireworks span:nth-child(7) {
+  --firework-x: -38px;
+  --firework-y: 1px;
+  background: #18a558;
+}
+.pronunciation-fireworks span:nth-child(8) {
+  --firework-x: -27px;
+  --firework-y: -25px;
+  background: #5b6cff;
+}
+@keyframes pronunciation-listening-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(91, 108, 255, 0.3); }
+  50% { box-shadow: 0 0 0 9px rgba(91, 108, 255, 0); }
+}
+@keyframes pronunciation-success-pop {
+  from { opacity: 0.25; transform: scale(0.88); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes pronunciation-firework {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.4); }
+  20% { opacity: 1; }
+  100% {
+    opacity: 0;
+    transform: translate(var(--firework-x), var(--firework-y)) scale(1);
+  }
+}
 .context {
   margin-top: 12px;
   font-size: 18px;
@@ -586,6 +789,30 @@ button {
 
 @media (max-width: 480px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .pronunciation-practice { margin-top: 14px; }
+  .pronunciation-controls {
+    align-items: stretch;
+    gap: 8px;
+  }
+  .pronunciation-mic-btn,
+  .pronunciation-play-btn {
+    flex: 1 1 145px;
+    padding-inline: 12px;
+  }
+  .pronunciation-examples { gap: 6px; }
+  .pronunciation-example { padding-inline: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pronunciation-mic-btn,
+  .pronunciation-mic-btn.listening,
+  .pronunciation-play-btn,
+  .pronunciation-example,
+  .pronunciation-feedback.correct {
+    animation: none;
+    transition: none;
+  }
+  .pronunciation-fireworks span { display: none; }
 }
 
 /* 版本更新框 */

@@ -10,5 +10,7 @@ export const REVIEW_MODES: { key: ReviewMode; label: string; lang: Lang; spellin
 ];
 
 export function countdownForReviewMode(configuredCountdownSec: number, reviewMode: ReviewMode) {
-  return reviewMode === 'en-spell' ? 0 : configuredCountdownSec;
+  return reviewMode === 'en-spell' || reviewMode === 'zh-read'
+    ? 0
+    : configuredCountdownSec;
 }

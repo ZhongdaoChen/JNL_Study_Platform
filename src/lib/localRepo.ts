@@ -1,6 +1,6 @@
 import type { Child, ReviewLog, Sentence, Word } from './types';
 import type { Repo } from './repo';
-import { initialSpellingReviewState } from './sm2';
+import { initialSpellingReviewState } from './sm2.ts';
 
 // 本地存储实现：数据保存在浏览器 localStorage。
 // 用于无后台时立即试用；接入 Supabase 后改用 SupabaseRepo 即可多设备同步。
@@ -76,6 +76,7 @@ export class LocalRepo implements Repo {
         text: w.text,
         lang: w.lang ?? 'en',
         needsSpelling: w.needsSpelling ?? true,
+        pronunciationExamples: w.pronunciationExamples ?? [],
         pendingRetryCount: w.pendingRetryCount ?? 0,
         spellingPendingRetryCount: w.spellingPendingRetryCount ?? 0,
         volatilityRate: w.volatilityRate ?? 0,
@@ -86,8 +87,35 @@ export class LocalRepo implements Repo {
   async upsertWord(word: Word): Promise<void> {
     const db = load();
     const idx = db.words.findIndex((w) => w.id === word.id);
-    if (idx >= 0) db.words[idx] = word;
-    else db.words.push(word);
+    if (idx >= 0) {
+      db.words[idx] = {
+        ...word,
+        exampleSentence: db.words[idx].exampleSentence ?? null,
+        pronunciationExamples: db.words[idx].pronunciationExamples ?? [],
+      };
+    } else {
+      db.words.push({
+        ...word,
+        exampleSentence: word.exampleSentence ?? null,
+        pronunciationExamples: word.pronunciationExamples ?? [],
+      });
+    }
+    save(db);
+  }
+
+  async updateExampleSentence(wordId: string, sentence: string): Promise<void> {
+    const db = load();
+    const word = db.words.find((item) => item.id === wordId);
+    if (!word) return;
+    word.exampleSentence = sentence;
+    save(db);
+  }
+
+  async updatePronunciationExamples(wordId: string, examples: string[]): Promise<void> {
+    const db = load();
+    const word = db.words.find((item) => item.id === wordId);
+    if (!word) return;
+    word.pronunciationExamples = examples;
     save(db);
   }
 

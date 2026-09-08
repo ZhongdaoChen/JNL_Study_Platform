@@ -52,6 +52,7 @@ export async function addLearning(
         firstLearnedAt: learnedOn,
         needsSpelling: true,
         exampleSentence: null,
+        pronunciationExamples: [],
         volatilityRate: 0,
         ...initialReviewState(learnedOn),
         ...initialSpellingReviewState(),

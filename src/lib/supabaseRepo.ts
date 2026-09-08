@@ -45,6 +45,9 @@ function rowToWord(r: any): Word {
     firstLearnedAt: r.first_learned_at,
     needsSpelling: r.needs_spelling ?? true,
     exampleSentence: r.example_sentence ?? null,
+    pronunciationExamples: Array.isArray(r.pronunciation_examples)
+      ? r.pronunciation_examples.filter((item: unknown): item is string => typeof item === 'string')
+      : [],
     interval: r.interval,
     ef: r.ef,
     repetitions: r.repetitions,
@@ -146,7 +149,6 @@ export class SupabaseRepo implements Repo {
       sentence_ids: word.sentenceIds,
       first_learned_at: word.firstLearnedAt,
       needs_spelling: word.needsSpelling,
-      example_sentence: word.exampleSentence,
       interval: word.interval,
       ef: word.ef,
       repetitions: word.repetitions,
@@ -164,6 +166,22 @@ export class SupabaseRepo implements Repo {
       spelling_pending_retry_count: word.spellingPendingRetryCount,
     });
     if (error) this.fail('upsertWord', error);
+  }
+
+  async updateExampleSentence(wordId: string, sentence: string): Promise<void> {
+    const { error } = await this.sb
+      .from('words')
+      .update({ example_sentence: sentence })
+      .eq('id', wordId);
+    if (error) this.fail('updateExampleSentence', error);
+  }
+
+  async updatePronunciationExamples(wordId: string, examples: string[]): Promise<void> {
+    const { error } = await this.sb
+      .from('words')
+      .update({ pronunciation_examples: examples })
+      .eq('id', wordId);
+    if (error) this.fail('updatePronunciationExamples', error);
   }
 
   async deleteWord(wordId: string): Promise<void> {

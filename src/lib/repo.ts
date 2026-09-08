@@ -14,6 +14,10 @@ export interface Repo {
   // 单词
   getWords(childId: string): Promise<Word[]>;
   upsertWord(word: Word): Promise<void>;
+  // exampleSentence 只通过此字段级更新写入，避免陈旧的整词快照覆盖新数据。
+  updateExampleSentence(wordId: string, sentence: string): Promise<void>;
+  // pronunciationExamples 只通过此字段级更新写入，避免陈旧的整词快照覆盖新数据。
+  updatePronunciationExamples(wordId: string, examples: string[]): Promise<void>;
   deleteWord(wordId: string): Promise<void>;
   deleteWords(wordIds: string[]): Promise<void>;
 
