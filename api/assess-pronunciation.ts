@@ -26,6 +26,9 @@ const HIGH_CONFIDENCE_THRESHOLD = 0.9;
 // 上游限流/抖动时重试一次；4xx（除 429）是请求本身的问题，重试没有意义。
 const TRANSIENT_UPSTREAM_STATUS = new Set([429, 500, 502, 503, 504]);
 const MAX_UPSTREAM_ATTEMPTS = 2;
+// 立即重试大概率撞上同一个限流窗口（重置后整批词到期、连续评估尤其明显），
+// 短暂退避后再试。默认 1.5s，预算内完全放得下（上游 deadline 35s）。
+const DEFAULT_RETRY_BACKOFF_MS = 1500;
 const MAX_RECOGNIZED_TEXT_CHARACTERS = 120;
 const PINYIN_RE = /^[a-züvāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]+[1-5]?$/iu;
 
@@ -138,6 +141,9 @@ async function handleAuthorizedAssessment(
 
     let judgmentResponse: Response | null = null;
     let judgmentStream: string | null = null;
+    // 502 诊断后缀：只含上游状态码和消毒后的 error.code（如 [429:Throttling.RateQuota]），
+    // 家长把界面上的文字报出来即可定位分支，不必登录 Vercel 翻日志。
+    let failureTag = '';
     for (let attempt = 1; attempt <= MAX_UPSTREAM_ATTEMPTS; attempt += 1) {
       try {
         const result = await context.fetchText(
@@ -150,26 +156,38 @@ async function handleAuthorizedAssessment(
           break;
         }
         // 只记录状态码与上游 error.code/message 字段，不落盘完整响应或任何密钥。
+        const detail = await upstreamErrorDetail(result.response);
         console.error('pronunciation upstream rejected', JSON.stringify({
           attempt,
           status: result.response.status,
-          detail: await upstreamErrorDetail(result.response),
+          detail,
         }));
+        failureTag = ` [${result.response.status}${
+          detail?.code ? `:${sanitizeDiagnosticCode(detail.code)}` : ''
+        }]`;
         if (!TRANSIENT_UPSTREAM_STATUS.has(result.response.status)) break;
+        if (attempt < MAX_UPSTREAM_ATTEMPTS) await sleep(retryBackoffMs());
       } catch (error) {
         if (error instanceof PronunciationTimeoutError) throw error;
+        const name = error instanceof Error ? error.name : typeof error;
         console.error('pronunciation upstream network failure', JSON.stringify({
           attempt,
-          name: error instanceof Error ? error.name : typeof error,
+          name,
           message: error instanceof Error
             ? error.message.slice(0, 200)
             : undefined,
         }));
-        if (attempt === MAX_UPSTREAM_ATTEMPTS) throw error;
+        if (attempt === MAX_UPSTREAM_ATTEMPTS) {
+          res.status(502).json({
+            error: `发音评估服务暂时不可用 [net:${sanitizeDiagnosticCode(String(name))}]`,
+          });
+          return;
+        }
+        await sleep(retryBackoffMs());
       }
     }
     if (judgmentResponse === null) {
-      res.status(502).json({ error: '发音评估服务暂时不可用' });
+      res.status(502).json({ error: `发音评估服务暂时不可用${failureTag}` });
       return;
     }
 
@@ -208,8 +226,25 @@ async function handleAuthorizedAssessment(
       res.status(504).json({ error: '发音评估超时，请稍后重试' });
       return;
     }
-    res.status(502).json({ error: '发音评估服务暂时不可用' });
+    const name = error instanceof Error ? error.name : typeof error;
+    res.status(502).json({
+      error: `发音评估服务暂时不可用 [int:${sanitizeDiagnosticCode(String(name))}]`,
+    });
   }
+}
+
+function retryBackoffMs(): number {
+  const parsed = Number(process.env.PRONUNCIATION_RETRY_BACKOFF_MS);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_RETRY_BACKOFF_MS;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+// 诊断码只允许字母数字与 ._-，杜绝把上游自由文本带进用户可见消息。
+function sanitizeDiagnosticCode(value: string): string {
+  return value.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 60);
 }
 
 async function upstreamErrorDetail(

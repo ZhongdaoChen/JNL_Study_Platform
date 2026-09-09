@@ -164,6 +164,7 @@ async function withServerEnvironment(
   const originalRateSecret = process.env.PRONUNCIATION_RATE_LIMIT_SECRET;
   const originalSecurityTimeout = process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS;
   const originalUpstreamTimeout = process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS;
+  const originalRetryBackoff = process.env.PRONUNCIATION_RETRY_BACKOFF_MS;
   const state: ServerEnvironmentState = { releaseCalls: 0, acquireBodies: [] };
   globalThis.fetch = (async (input, init) => {
     const url = String(input);
@@ -194,6 +195,7 @@ async function withServerEnvironment(
   process.env.PRONUNCIATION_RATE_LIMIT_SECRET = 'rate-limit-secret';
   process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS = '20';
   process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS = '25';
+  process.env.PRONUNCIATION_RETRY_BACKOFF_MS = '0';
 
   try {
     await run(state);
@@ -216,6 +218,8 @@ async function withServerEnvironment(
     else process.env.PRONUNCIATION_SECURITY_TIMEOUT_MS = originalSecurityTimeout;
     if (originalUpstreamTimeout === undefined) delete process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS;
     else process.env.PRONUNCIATION_UPSTREAM_TIMEOUT_MS = originalUpstreamTimeout;
+    if (originalRetryBackoff === undefined) delete process.env.PRONUNCIATION_RETRY_BACKOFF_MS;
+    else process.env.PRONUNCIATION_RETRY_BACKOFF_MS = originalRetryBackoff;
   }
 }
 
@@ -712,9 +716,29 @@ test('assessment gives up after two transient upstream failures', async () => {
 
     assert.deepEqual(result, {
       status: 502,
-      body: { error: '发音评估服务暂时不可用' },
+      body: { error: '发音评估服务暂时不可用 [503:InternalError]' },
     });
     assert.equal(fetchCount, 2);
+  });
+});
+
+test('assessment reports a sanitized network failure tag after both attempts fail', async () => {
+  let fetchCount = 0;
+  await withServerEnvironment((async () => {
+    fetchCount += 1;
+    throw new TypeError('fetch failed (secret-host details)');
+  }) as typeof fetch, async () => {
+    const result = await invokeHandler(assessPronunciation, {
+      method: 'POST',
+      body: { target: '中', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
+    });
+
+    assert.deepEqual(result, {
+      status: 502,
+      body: { error: '发音评估服务暂时不可用 [net:TypeError]' },
+    });
+    assert.equal(fetchCount, 2);
+    assert.doesNotMatch(JSON.stringify(result.body), /fetch failed|secret-host/);
   });
 });
 
@@ -731,10 +755,11 @@ test('assessment does not retry a non-transient upstream rejection', async () =>
 
     assert.deepEqual(result, {
       status: 502,
-      body: { error: '发音评估服务暂时不可用' },
+      body: { error: '发音评估服务暂时不可用 [400:InvalidParameter]' },
     });
     assert.equal(fetchCount, 1);
-    assert.doesNotMatch(JSON.stringify(result.body), /bad audio|InvalidParameter/);
+    // 诊断码是白名单枚举可以展示；上游自由文本 message 绝不能带进用户可见消息。
+    assert.doesNotMatch(JSON.stringify(result.body), /bad audio|upstream-secret|server-test-key/);
   });
 });
 
