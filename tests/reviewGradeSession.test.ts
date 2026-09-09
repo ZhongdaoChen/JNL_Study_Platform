@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  beginReviewAdvanceDeferral,
   beginReviewGradeNavigation,
   createReviewGradeCoordinator,
+  isReviewAdvanceDeferred,
   resetReviewGradeCoordinatorForWord,
   reviewGradeAvailability,
   reviewGradeNavigationAllowed,
@@ -414,4 +416,69 @@ test('correct feedback delay starts after persistence and keeps its full duratio
   feedbackDelay.resolve();
   await automatic;
   assert.deepEqual(events, ['persisted', 'delay:1200', 'advanced']);
+});
+
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+}
+
+test('feedback wait without deferral keeps the original single delay', async () => {
+  const delays: number[] = [];
+  await waitForReviewGradeFeedback(2000, async (delayMs) => {
+    delays.push(delayMs);
+  });
+  assert.deepEqual(delays, [2000]);
+  assert.equal(isReviewAdvanceDeferred(), false);
+});
+
+test('an active deferral holds the advance and adds one grace window after release', async () => {
+  const delays: number[] = [];
+  const release = beginReviewAdvanceDeferral();
+  let resolved = false;
+  const waiting = waitForReviewGradeFeedback(1200, async (delayMs) => {
+    delays.push(delayMs);
+  }).then(() => {
+    resolved = true;
+  });
+
+  await flushMicrotasks();
+  assert.deepEqual(delays, [1200]);
+  assert.equal(resolved, false);
+  assert.equal(isReviewAdvanceDeferred(), true);
+
+  release();
+  await waiting;
+  assert.deepEqual(delays, [1200, 1200]);
+  assert.equal(resolved, true);
+  assert.equal(isReviewAdvanceDeferred(), false);
+});
+
+test('a deferral started during the grace window defers the advance again', async () => {
+  const delays: number[] = [];
+  let waitCount = 0;
+  let secondRelease: (() => void) | null = null;
+  const firstRelease = beginReviewAdvanceDeferral();
+  let resolved = false;
+  const waiting = waitForReviewGradeFeedback(1200, async (delayMs) => {
+    delays.push(delayMs);
+    waitCount += 1;
+    if (waitCount === 2) {
+      // 第一轮播放刚结束，孩子又立刻点开了「听正确读音」。
+      secondRelease = beginReviewAdvanceDeferral();
+    }
+  }).then(() => {
+    resolved = true;
+  });
+
+  await flushMicrotasks();
+  firstRelease();
+  await flushMicrotasks();
+  assert.equal(resolved, false);
+  assert.deepEqual(delays, [1200, 1200]);
+
+  assert.ok(secondRelease !== null);
+  secondRelease();
+  await waiting;
+  assert.deepEqual(delays, [1200, 1200, 1200]);
+  assert.equal(isReviewAdvanceDeferred(), false);
 });

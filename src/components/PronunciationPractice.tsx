@@ -25,6 +25,7 @@ import {
   settlePronunciationOutcome,
   startPronunciationPlayback,
 } from './pronunciationSession';
+import { beginReviewAdvanceDeferral } from './reviewGradeSession';
 
 export type PronunciationStatus =
   | 'idle'
@@ -448,6 +449,17 @@ export default function PronunciationPractice({
   }
 
   async function playCorrectPronunciation(): Promise<void> {
+    // 注册“进位让行”：自动进位倒计时到点时若还在准备/播放标准读音，
+    // 切词会等到播放结束（外加一个反馈窗口）之后才发生。
+    const releaseAdvanceDeferral = beginReviewAdvanceDeferral();
+    try {
+      await playCorrectPronunciationItems();
+    } finally {
+      releaseAdvanceDeferral();
+    }
+  }
+
+  async function playCorrectPronunciationItems(): Promise<void> {
     const targetWord = wordRef.current;
     const items = pronunciationPlaybackItems(
       targetWord.text,
