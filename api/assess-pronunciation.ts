@@ -23,9 +23,12 @@ import {
 // 单阶段评估：一次调用同时完成转写与发音判定。模型固定，避免部署配置漂移。
 const ASSESS_MODEL = 'qwen3.5-omni-flash';
 const HIGH_CONFIDENCE_THRESHOLD = 0.9;
-// 上游限流/抖动时重试一次；4xx（除 429）是请求本身的问题，重试没有意义。
+// 上游限流/抖动时重试；4xx（除 429）是请求本身的问题，重试没有意义。
 const TRANSIENT_UPSTREAM_STATUS = new Set([429, 500, 502, 503, 504]);
-const MAX_UPSTREAM_ATTEMPTS = 2;
+// Vercel(sin1) → dashscope.aliyuncs.com 是跨境链路，实测会出现
+// TypeError("fetch failed")（连接层直接失败，秒级返回）。失败快、退避短，
+// 多试一次代价很小，因此网络类失败总共尝试 3 次。
+const MAX_UPSTREAM_ATTEMPTS = 3;
 // 立即重试大概率撞上同一个限流窗口（重置后整批词到期、连续评估尤其明显），
 // 短暂退避后再试。默认 1.5s，预算内完全放得下（上游 deadline 35s）。
 const DEFAULT_RETRY_BACKOFF_MS = 1500;
@@ -169,17 +172,14 @@ async function handleAuthorizedAssessment(
         if (attempt < MAX_UPSTREAM_ATTEMPTS) await sleep(retryBackoffMs());
       } catch (error) {
         if (error instanceof PronunciationTimeoutError) throw error;
-        const name = error instanceof Error ? error.name : typeof error;
+        const detail = networkFailureDetail(error);
         console.error('pronunciation upstream network failure', JSON.stringify({
           attempt,
-          name,
-          message: error instanceof Error
-            ? error.message.slice(0, 200)
-            : undefined,
+          ...detail,
         }));
         if (attempt === MAX_UPSTREAM_ATTEMPTS) {
           res.status(502).json({
-            error: `发音评估服务暂时不可用 [net:${sanitizeDiagnosticCode(String(name))}]`,
+            error: `发音评估服务暂时不可用 [net:${sanitizeDiagnosticCode(detail.tag)}]`,
           });
           return;
         }
@@ -245,6 +245,51 @@ function sleep(ms: number): Promise<void> {
 // 诊断码只允许字母数字与 ._-，杜绝把上游自由文本带进用户可见消息。
 function sanitizeDiagnosticCode(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 60);
+}
+
+interface NetworkFailureDetail {
+  name: string;
+  message?: string;
+  causeName?: string;
+  causeCode?: string;
+  tag: string;
+}
+
+// undici 把连接层错误包成 TypeError("fetch failed")，真正的原因藏在
+// error.cause（ECONNRESET / ENOTFOUND / UND_ERR_CONNECT_TIMEOUT 等）；
+// Happy Eyeballs 下 cause 还可能是 AggregateError，真错误在 errors[0]。
+// 挖到最深一层，日志与 [net:...] 诊断码都用它，否则永远只能看到 "fetch failed"。
+function networkFailureDetail(error: unknown): NetworkFailureDetail {
+  const name = error instanceof Error ? error.name : String(typeof error);
+  const message = error instanceof Error ? error.message.slice(0, 200) : undefined;
+  const cause = deepestCause(error);
+  const causeName = cause instanceof Error ? cause.name : undefined;
+  const rawCode = cause instanceof Error
+    ? (cause as { code?: unknown }).code
+    : undefined;
+  const causeCode = typeof rawCode === 'string' ? rawCode : undefined;
+  return {
+    name,
+    message,
+    causeName,
+    causeCode,
+    tag: causeCode ?? causeName ?? name,
+  };
+}
+
+function deepestCause(error: unknown): unknown {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (!(current instanceof Error)) break;
+    const aggregate = (current as { errors?: unknown }).errors;
+    const next = current.cause
+      ?? (Array.isArray(aggregate) && aggregate.length > 0
+        ? aggregate[0]
+        : undefined);
+    if (next === undefined) break;
+    current = next;
+  }
+  return current;
 }
 
 async function upstreamErrorDetail(

@@ -718,11 +718,11 @@ test('assessment gives up after two transient upstream failures', async () => {
       status: 502,
       body: { error: '发音评估服务暂时不可用 [503:InternalError]' },
     });
-    assert.equal(fetchCount, 2);
+    assert.equal(fetchCount, 3);
   });
 });
 
-test('assessment reports a sanitized network failure tag after both attempts fail', async () => {
+test('assessment reports a sanitized network failure tag after every attempt fails', async () => {
   let fetchCount = 0;
   await withServerEnvironment((async () => {
     fetchCount += 1;
@@ -737,8 +737,44 @@ test('assessment reports a sanitized network failure tag after both attempts fai
       status: 502,
       body: { error: '发音评估服务暂时不可用 [net:TypeError]' },
     });
-    assert.equal(fetchCount, 2);
+    assert.equal(fetchCount, 3);
     assert.doesNotMatch(JSON.stringify(result.body), /fetch failed|secret-host/);
+  });
+});
+
+test('assessment surfaces the deepest network cause code, not the fetch failed wrapper', async () => {
+  await withServerEnvironment((async () => {
+    const cause = Object.assign(new Error('other side closed'), { code: 'ECONNRESET' });
+    throw new TypeError('fetch failed', { cause });
+  }) as typeof fetch, async () => {
+    const result = await invokeHandler(assessPronunciation, {
+      method: 'POST',
+      body: { target: '中', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
+    });
+
+    assert.deepEqual(result, {
+      status: 502,
+      body: { error: '发音评估服务暂时不可用 [net:ECONNRESET]' },
+    });
+    assert.doesNotMatch(JSON.stringify(result.body), /other side closed/);
+  });
+});
+
+test('assessment unwraps an AggregateError cause from happy-eyeballs failures', async () => {
+  await withServerEnvironment((async () => {
+    const inner = Object.assign(new Error('connect failed'), { code: 'ENETUNREACH' });
+    const aggregate = new AggregateError([inner], 'Happy Eyeballs connection failed');
+    throw new TypeError('fetch failed', { cause: aggregate });
+  }) as typeof fetch, async () => {
+    const result = await invokeHandler(assessPronunciation, {
+      method: 'POST',
+      body: { target: '中', mimeType: 'audio/wav', audioBase64: VALID_AUDIO_BASE64 },
+    });
+
+    assert.deepEqual(result, {
+      status: 502,
+      body: { error: '发音评估服务暂时不可用 [net:ENETUNREACH]' },
+    });
   });
 });
 
