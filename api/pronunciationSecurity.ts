@@ -1,3 +1,5 @@
+import { dashScopeDispatcher } from './pronunciationShared.js';
+
 export type PronunciationEndpoint = 'assessment' | 'examples' | 'synthesis';
 
 export interface PronunciationSecurityRequest {
@@ -108,13 +110,23 @@ export async function withPronunciationSecurity(
   try {
     await work({
       signal: deadline.signal,
+      // dispatcher 收紧跨境建连超时（见 pronunciationShared.dashScopeDispatcher），
+      // 仅作用于 DashScope 上游调用；RequestInit 类型里没有该字段，需要断言。
       fetchJson: (input, init) => deadline.run(async (signal) => {
-        const response = await fetch(input, { ...init, signal });
+        const response = await fetch(input, {
+          ...init,
+          signal,
+          dispatcher: dashScopeDispatcher(),
+        } as RequestInit);
         const data = response.ok ? await readJson(response) : null;
         return { response, data };
       }),
       fetchText: (input, init) => deadline.run(async (signal) => {
-        const response = await fetch(input, { ...init, signal });
+        const response = await fetch(input, {
+          ...init,
+          signal,
+          dispatcher: dashScopeDispatcher(),
+        } as RequestInit);
         const data = response.ok ? await readText(response) : null;
         return { response, data };
       }),

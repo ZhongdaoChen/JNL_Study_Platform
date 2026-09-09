@@ -703,7 +703,7 @@ test('assessment retries a transient upstream rejection once and can succeed', a
   });
 });
 
-test('assessment gives up after two transient upstream failures', async () => {
+test('assessment gives up after exhausting every transient upstream attempt', async () => {
   let fetchCount = 0;
   await withServerEnvironment((async () => {
     fetchCount += 1;
@@ -718,7 +718,7 @@ test('assessment gives up after two transient upstream failures', async () => {
       status: 502,
       body: { error: '发音评估服务暂时不可用 [503:InternalError]' },
     });
-    assert.equal(fetchCount, 3);
+    assert.equal(fetchCount, 5);
   });
 });
 
@@ -737,7 +737,7 @@ test('assessment reports a sanitized network failure tag after every attempt fai
       status: 502,
       body: { error: '发音评估服务暂时不可用 [net:TypeError]' },
     });
-    assert.equal(fetchCount, 3);
+    assert.equal(fetchCount, 5);
     assert.doesNotMatch(JSON.stringify(result.body), /fetch failed|secret-host/);
   });
 });

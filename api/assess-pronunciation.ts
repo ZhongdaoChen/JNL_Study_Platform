@@ -25,10 +25,11 @@ const ASSESS_MODEL = 'qwen3.5-omni-flash';
 const HIGH_CONFIDENCE_THRESHOLD = 0.9;
 // 上游限流/抖动时重试；4xx（除 429）是请求本身的问题，重试没有意义。
 const TRANSIENT_UPSTREAM_STATUS = new Set([429, 500, 502, 503, 504]);
-// Vercel(sin1) → dashscope.aliyuncs.com 是跨境链路，实测会出现
-// TypeError("fetch failed")（连接层直接失败，秒级返回）。失败快、退避短，
-// 多试一次代价很小，因此网络类失败总共尝试 3 次。
-const MAX_UPSTREAM_ATTEMPTS = 3;
+// Vercel(sin1) → dashscope.aliyuncs.com 是跨境链路，线上实测
+// UND_ERR_CONNECT_TIMEOUT（建连超时，undici dispatcher 已压到 5 秒）。
+// 失败快、退避短：最坏 5 次建连超时 + 4 次退避 ≈ 31 秒，仍在 35 秒
+// 上游 deadline 内，多打几次 TCP 显著提高劣化窗口内的穿透概率。
+const MAX_UPSTREAM_ATTEMPTS = 5;
 // 立即重试大概率撞上同一个限流窗口（重置后整批词到期、连续评估尤其明显），
 // 短暂退避后再试。默认 1.5s，预算内完全放得下（上游 deadline 35s）。
 const DEFAULT_RETRY_BACKOFF_MS = 1500;

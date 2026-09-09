@@ -1,3 +1,4 @@
+import { Agent, type Dispatcher } from 'undici';
 import { isSingleHanCharacter } from './pronunciationRules.js';
 
 export const DASH_SCOPE_MULTIMODAL_URL =
@@ -5,6 +6,23 @@ export const DASH_SCOPE_MULTIMODAL_URL =
 
 export const DASH_SCOPE_CHAT_COMPLETIONS_URL =
   'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+
+// Vercel(sin1) → dashscope.aliyuncs.com 是跨境链路，线上实测
+// UND_ERR_CONNECT_TIMEOUT：undici 默认连接超时 10 秒，失败一次就烧掉
+// 10 秒预算。压到 5 秒后，同样的上游 deadline 里能塞进更多次尝试，
+// 劣化窗口内的穿透概率显著提高。只影响建连阶段，SSE 流式读取的
+// headers/body 超时保持默认（300 秒）。
+const DASH_SCOPE_CONNECT_TIMEOUT_MS = 5_000;
+let dashScopeDispatcherInstance: Dispatcher | null = null;
+
+export function dashScopeDispatcher(): Dispatcher {
+  if (dashScopeDispatcherInstance === null) {
+    dashScopeDispatcherInstance = new Agent({
+      connect: { timeout: DASH_SCOPE_CONNECT_TIMEOUT_MS },
+    });
+  }
+  return dashScopeDispatcherInstance;
+}
 
 const HAN_TEXT_RE = /^[\p{Script=Han}\s，。！？、,.!?；;：“”"'（）()]+$/u;
 const HAN_CHARACTER_RE = /\p{Script=Han}/u;
